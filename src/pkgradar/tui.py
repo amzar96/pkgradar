@@ -110,6 +110,7 @@ class PkgRadarApp(App):
         self.deep = deep
         self.result: ScanResult | None = None
         self._incoming: dict[str, dict[str, list[Any]]] = {}
+        self._tree_budget = 0
 
     # ------------------------------------------------------------------ layout
     def compose(self) -> ComposeResult:
@@ -289,7 +290,13 @@ class PkgRadarApp(App):
                 data={"project": project, "node": None},
                 expand=project is result.projects[0],
             )
-            self._add_children(project_node, project, "root", set(), 0)
+            nodes = {node.id: node for node in project.nodes}
+            self._tree_budget = 2000
+            self._add_children(project_node, project, nodes, "root", set(), 0)
+            if self._tree_budget <= 0:
+                project_node.add(
+                    "[dim](tree truncated — open the web UI for the full graph)[/dim]"
+                )
         tree.root.expand()
         first = result.projects[0]
         self._show_project(first)
@@ -298,28 +305,27 @@ class PkgRadarApp(App):
         self,
         parent,
         project: Project,
+        nodes: dict[str, PackageNode],
         source_id: str,
         seen: set[str],
         depth: int,
     ) -> None:
-        if depth > 10:
+        if depth > 10 or self._tree_budget <= 0:
             return
-        nodes = {node.id: node for node in project.nodes}
         for edge in project.edges:
             if edge.source != source_id:
                 continue
             child = nodes.get(edge.target)
-            if child is None or child.id in seen:
+            if child is None or child.id in seen or child.root:
                 continue
+            self._tree_budget -= 1
             branch = seen | {child.id}
-            if child.root:
-                continue
             branch_node = parent.add(
                 _node_label(child),
                 data={"project": project, "node": child},
                 expand=False,
             )
-            self._add_children(branch_node, project, child.id, branch, depth + 1)
+            self._add_children(branch_node, project, nodes, child.id, branch, depth + 1)
 
     # --------------------------------------------------------------- inspector
     @on(Tree.NodeHighlighted, "#tree")
