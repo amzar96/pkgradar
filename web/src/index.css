@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #07080b;
+  --color-panel: #0c1015;
+  --color-panel2: #10151c;
+  --color-line: #1b232e;
+  --color-line2: #273241;
+  --color-fg: #e7edf4;
+  --color-muted: #8b98a9;
+  --color-dim: #5c6878;
+  --color-accent: #7dd3fc;
+  --color-good: #34d399;
+  --color-patch: #a3e635;
+  --color-minor: #fbbf24;
+  --color-major: #f87171;
+  --color-cve: #e879f9;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: var(--color-fg);
+  font-family: ui-sans-serif, -apple-system, "Inter", "Segoe UI", sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(125, 211, 252, 0.28);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #232c38;
+  border-radius: 99px;
+  border: 2px solid var(--color-ink);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #33404f;
+}
+
+button {
+  cursor: pointer;
+  font: inherit;
+}
+
+input {
+  font: inherit;
+}
+
+/* ---- react-flow theming ---- */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-edge-stroke-default: #2a3542;
+  --xy-edge-stroke-selected-default: #7dd3fc;
+  --xy-connectionline-stroke-default: #7dd3fc;
+  --xy-attribution-background-color: transparent;
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+.react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.react-flow__node {
+  font-size: 12px;
+}
+
+.react-flow__edge-path {
+  transition: stroke 120ms ease, stroke-width 120ms ease;
+}
+
+.react-flow__controls {
+  background: #0c1015;
+  border: 1px solid #1b232e;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.react-flow__controls-button {
+  background: transparent;
+  border-bottom: 1px solid #1b232e;
+  color: #8b98a9;
+  fill: #8b98a9;
+}
+.react-flow__controls-button:hover {
+  background: #151b24;
+}
+
+.react-flow__minimap {
+  background: #0c1015 !important;
+  border: 1px solid #1b232e;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* subtle canvas grid */
+.dot-grid {
+  background-image: radial-gradient(circle at 1px 1px, #1c2531 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+.scanline {
+  background: linear-gradient(180deg, rgba(125, 211, 252, 0.06), transparent 60%);
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.pulse-soft {
+  animation: pulse-soft 1.6s ease-in-out infinite;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.slide-in {
+  animation: slide-in 160ms ease-out;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
