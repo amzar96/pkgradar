@@ -23,38 +23,45 @@ import { CopyButton, DeltaBadge, HealthDot, Pill } from "./primitives";
 
 function pathToRoot(project: Project, nodeId: string): PackageNode[] {
   const byId = new Map(project.nodes.map((node) => [node.id, node]));
-  const incoming = new Map<string, PackageEdge[]>();
+  const outgoing = new Map<string, PackageEdge[]>();
   for (const edge of project.edges) {
-    const list = incoming.get(edge.target) ?? [];
+    const list = outgoing.get(edge.source) ?? [];
     list.push(edge);
-    incoming.set(edge.target, list);
+    outgoing.set(edge.source, list);
   }
-  const previous = new Map<string, string | null>();
-  const queue = [nodeId];
-  previous.set(nodeId, null);
-  let found: string | null = null;
+  // Walk from the root so `parent` points towards the root; walking backwards
+  // from the node only records predecessors and produces a one-node chain.
+  const parent = new Map<string, string | null>([["root", null]]);
+  const queue = ["root"];
   while (queue.length) {
     const current = queue.shift()!;
-    if (current === "root") {
-      found = "root";
-      break;
-    }
-    for (const edge of incoming.get(current) ?? []) {
-      if (!previous.has(edge.source)) {
-        previous.set(edge.source, current);
-        queue.push(edge.source);
+    if (current === nodeId) break;
+    for (const edge of outgoing.get(current) ?? []) {
+      if (!parent.has(edge.target)) {
+        parent.set(edge.target, current);
+        queue.push(edge.target);
       }
     }
   }
-  if (!found) return [];
+  if (!parent.has(nodeId)) return [];
   const chain: PackageNode[] = [];
   let cursor: string | null = nodeId;
   while (cursor) {
     const node = byId.get(cursor);
     if (node) chain.push(node);
-    cursor = previous.get(cursor) ?? null;
+    cursor = parent.get(cursor) ?? null;
   }
   return chain.reverse();
+}
+
+function advisoryHref(url: string | null | undefined): string {
+  if (!url) return "#";
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "#";
+  } catch {
+    return "#";
+  }
 }
 
 export default function Inspector() {
@@ -165,7 +172,10 @@ export default function Inspector() {
               {node.advisories.slice(0, 25).map((advisory) => (
                 <a
                   key={advisory.id}
-                  href={advisory.url ?? "#"}
+                  href={advisoryHref(advisory.url)}
+                  onClick={(event) => {
+                    if (advisoryHref(advisory.url) === "#") event.preventDefault();
+                  }}
                   target="_blank"
                   rel="noreferrer"
                   className="block rounded-md border border-line bg-panel px-2.5 py-2 transition hover:border-line2"
@@ -256,7 +266,14 @@ export default function Inspector() {
         </Section>
 
         <Section title="Environment">
-          <Row label="Installed" value={node.installed_version || "not installed"} mono />
+          <Row
+            label="Installed"
+            value={
+              node.installed_version ??
+              (node.drift === "missing" ? "missing from venv" : "not scanned")
+            }
+            mono
+          />
           <Row
             label="Locked"
             value={node.version}

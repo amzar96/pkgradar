@@ -11,7 +11,12 @@ export interface ScanParams {
 export interface ScanHandlers {
   onProgress?: (data: { phase: string; message: string; done: number; total: number }) => void;
   onProject?: (project: Project) => void;
-  onEnrich?: (data: { message: string; done: number; total: number }) => void;
+  onEnrich?: (data: {
+    phase: string;
+    message: string;
+    done: number;
+    total: number;
+  }) => void;
   onDone?: (result: ScanResult) => void;
   onError?: (message: string) => void;
 }

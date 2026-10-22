@@ -7,10 +7,11 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 
-from .utils import normalize_name, parse_version
+from .utils import normalize_name, parse_version, safe_filename
 
 CACHE_ROOT = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "pkgradar"
 PYPI_TTL = 24 * 3600
@@ -34,7 +35,7 @@ class PackageInfo:
 
 
 def _cache_path(name: str) -> Path:
-    safe = normalize_name(name).replace("/", "_")
+    safe = safe_filename(normalize_name(name), lower=True)
     return CACHE_ROOT / "pypi" / f"{safe}.json"
 
 
@@ -168,7 +169,7 @@ class PyPIClient:
         async with self._sem:
             for attempt in range(3):
                 try:
-                    res = await client.get(f"https://pypi.org/pypi/{name}/json")
+                    res = await client.get(f"https://pypi.org/pypi/{quote(name, safe='')}/json")
                     if res.status_code == 404:
                         info = PackageInfo(name=name, available=False)
                         _save_cache(name, info)

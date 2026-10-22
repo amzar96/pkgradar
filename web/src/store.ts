@@ -5,6 +5,13 @@ import type { Project, ScanResult, View } from "./types";
 type Status = "idle" | "scanning" | "ready" | "error";
 export type LayoutKind = "auto" | "radial" | "compact" | "layered";
 
+export const HASH_VIEWS: View[] = ["fleet", "topology", "packages", "conflicts", "skew"];
+
+export function initialView(): View {
+  const hash = window.location.hash.replace("#", "") as View;
+  return HASH_VIEWS.includes(hash) ? hash : "fleet";
+}
+
 interface Progress {
   phase: string;
   message: string;
@@ -55,7 +62,7 @@ interface AppState {
 }
 
 export const useApp = create<AppState>((set, get) => ({
-  view: "fleet",
+  view: initialView(),
   status: "idle",
   progress: { phase: "", message: "", done: 0, total: 0 },
   error: null,

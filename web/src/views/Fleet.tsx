@@ -136,15 +136,17 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
     let minor = 0;
     let patch = 0;
     let ok = 0;
+    let unknown = 0;
     for (const node of project.nodes) {
       if (node.root) continue;
       if (node.advisories.length) cve += 1;
       else if (node.delta === "major" || node.breaking) major += 1;
       else if (node.delta === "minor") minor += 1;
       else if (node.delta === "patch" || node.delta === "other") patch += 1;
-      else ok += 1;
+      else if (node.delta === "none") ok += 1;
+      else unknown += 1;
     }
-    return { cve, major, minor, patch, ok };
+    return { cve, major, minor, patch, ok, unknown };
   })();
 
   const risks = [...project.nodes]
@@ -184,11 +186,13 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
             { value: counts.minor, color: HEALTH_COLOR.minor },
             { value: counts.major, color: HEALTH_COLOR.major },
             { value: counts.cve, color: HEALTH_COLOR.cve },
+            { value: counts.unknown, color: HEALTH_COLOR.unknown },
           ]}
         />
         <div className="mt-1.5 flex items-center justify-between text-[9px] text-dim">
           <span>
             {pct(counts.ok, total)}% current · {pct(counts.cve + counts.major, total)}% need attention
+            {counts.unknown ? ` · ${counts.unknown} unknown` : ""}
           </span>
           <span className="font-mono">{total} total</span>
         </div>
@@ -221,8 +225,8 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
           />
           {project.venv.broken
             ? "venv broken"
-            : project.venv.python
-              ? `py${project.venv.python} · ${project.venv.installed} installed`
+            : project.venv.exists
+              ? `py${project.venv.python ?? "?"} · ${project.venv.installed} installed`
               : "no venv"}
         </span>
         <span className="text-line2">·</span>

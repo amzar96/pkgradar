@@ -25,6 +25,14 @@ const KIND_LABEL: Record<string, string> = {
   drift: "drift",
 };
 
+const KIND_FOOTER: Record<string, string> = {
+  constraint: "no version satisfies all of the above",
+  declared: "the installed version falls outside the declared range",
+  env: "the installed environment is incompatible",
+  resolver: "uv could not resolve the project",
+  drift: "the installed environment differs from the lockfile",
+};
+
 export default function Conflicts() {
   const result = useApp((state) => state.result);
   const projects = useApp((state) => state.projects);
@@ -51,8 +59,7 @@ export default function Conflicts() {
           <div>
             <h1 className="text-[18px] font-semibold tracking-tight text-fg">Conflicts &amp; drift</h1>
             <p className="mt-1 text-[11.5px] text-dim">
-              Empty constraint intersections, incompatible environments, resolver failures, and
-              lock/venv drift — each with the blame chain.
+              Empty constraint intersections, incompatible environments, and lock/venv drift.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -76,7 +83,7 @@ export default function Conflicts() {
             <EmptyState
               icon={<ShieldCheck size={30} className="text-good/70" />}
               title="No hard conflicts"
-              detail="Every declared range has a non-empty intersection, uv lock --check passes, and uv pip check reports a coherent environment. Outdated packages still show up on the Packages and Skew views."
+              detail="Every declared range has a non-empty intersection, the lockfile matches the manifest, and the installed environment matches the lockfile. Outdated packages still show up on the Packages and Skew views."
             />
           </div>
         ) : (
@@ -152,7 +159,9 @@ export default function Conflicts() {
                           </div>
                           <div className="mt-2 flex items-center gap-1.5 border-t border-line/60 pt-1.5 font-mono text-[10px]">
                             <ArrowRight size={11} className="text-major" />
-                            <span className="text-major">no version satisfies all of the above</span>
+                            <span className="text-major">
+                              {KIND_FOOTER[conflict.kind] ?? "see the details above"}
+                            </span>
                           </div>
                         </div>
                       ) : null}

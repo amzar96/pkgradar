@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import re
+import tempfile
+import uuid
 from dataclasses import dataclass, field
 from email.parser import Parser
 from pathlib import Path
@@ -76,6 +77,30 @@ def venv_python(venv: Path) -> Path | None:
     return None
 
 
+def safe_python(venv: Path) -> Path | None:
+    """Return the interpreter only when it is safe to execute.
+
+    uv queries the project interpreter for `lock --check` and `sync --dry-run`,
+    so a cloned repository that ships an executable at `.venv/bin/python` can
+    run arbitrary code as the user. A real POSIX venv uses a symlink to an
+    interpreter outside the project; only that layout is trusted. Windows venvs
+    copy python.exe into the venv, so they are treated as untrusted.
+    """
+    candidate = venv / "bin" / "python"
+    if not candidate.is_symlink():
+        return None
+    try:
+        target = candidate.resolve(strict=True)
+        project = venv.parent.resolve(strict=True)
+    except OSError:
+        return None
+    try:
+        target.relative_to(project)
+    except ValueError:
+        return target if target.is_file() else None
+    return None
+
+
 def site_packages(venv: Path) -> Path | None:
     matches = sorted(venv.glob("lib/python*/site-packages"))
     if matches:
@@ -86,7 +111,8 @@ def site_packages(venv: Path) -> Path | None:
     return None
 
 
-def _python_version(venv: Path, python: Path | None) -> str | None:
+def _python_version(venv: Path) -> str | None:
+    """Read the version from pyvenv.cfg; never execute the project interpreter."""
     cfg = venv / "pyvenv.cfg"
     if cfg.exists():
         try:
@@ -98,10 +124,6 @@ def _python_version(venv: Path, python: Path | None) -> str | None:
                     return value.strip()
         except Exception:
             pass
-    if python:
-        res = run([str(python), "-c", "import platform;print(platform.python_version())"], timeout=15)
-        if res.code == 0 and res.out.strip():
-            return res.out.strip()
     return None
 
 
@@ -157,46 +179,16 @@ def scan_venv(venv: Path) -> VenvState:
         return VenvState(info=info)
 
     info.exists = True
-    info.python = _python_version(venv, python)
+    info.python = _python_version(venv)
 
     site = site_packages(venv)
     installed: list[InstalledPackage] = read_installed(site) if site else []
 
-    res = run(
-        [uv_bin(), "pip", "list", "--format", "json", "--python", str(python)],
-        timeout=60,
-    )
-    if res.code == 0 and res.out.strip():
-        try:
-            rows = json.loads(res.out)
-            by_name = {p.name: p for p in installed}
-            installed = []
-            for row in rows:
-                name = normalize_name(str(row.get("name", "")))
-                if not name:
-                    continue
-                base = by_name.get(name)
-                installed.append(
-                    InstalledPackage(
-                        name=name,
-                        version=str(row.get("version", "")),
-                        requires=base.requires if base else [],
-                        license=base.license if base else None,
-                        summary=base.summary if base else None,
-                    )
-                )
-        except json.JSONDecodeError:
-            pass
-
     info.installed = len(installed)
-    check = run([uv_bin(), "pip", "check", "--python", str(python)], timeout=60)
-    if check.code == 0:
-        info.check = "ok"
-    elif check.code == 127:
-        info.check = "unknown"
-    else:
-        info.check = "incompatible"
-        info.check_output = check.text[:4000]
+    # `uv pip list` / `uv pip check` execute the project interpreter, which is
+    # attacker-controlled when scanning a cloned repo. dist-info is authoritative
+    # for versions, so we deliberately do not run them. Compatibility is unknown.
+    info.check = "unknown"
 
     return VenvState(
         info=info,
@@ -314,12 +306,16 @@ def enrich_edge_specs(nodes: list[PackageNode], edges: list[PackageEdge], state:
             edge.marker = str(chosen.marker)
 
 
-def sync_plan(project_dir: Path) -> tuple[DriftPlan, str | None]:
+def sync_plan(project_dir: Path, venv: Path | None = None) -> tuple[DriftPlan, str | None]:
     """`uv sync --dry-run` is read-only and tells us the real delta.
 
-    uv prints the count headers separately from the bullet lists, so bucket the
-    bullets by matching their length against the reported counts.
+    uv queries the project interpreter while syncing. Skip the plan when the
+    venv does not have the trusted symlink layout, so a cloned repo cannot get
+    us to execute its `.venv/bin/python`. dist-info drift is still reported.
     """
+    if venv is not None and safe_python(venv) is None:
+        return DriftPlan(), None
+
     res = run([uv_bin(), "sync", "--dry-run"], cwd=project_dir, timeout=120)
     text = res.text
     if res.code != 0:
@@ -414,7 +410,16 @@ def reconcile_drift(project, plan: DriftPlan) -> None:
 
 
 def lock_check(project_dir: Path) -> tuple[bool | None, str | None]:
-    res = run([uv_bin(), "lock", "--check"], cwd=project_dir, timeout=120)
+    # `uv lock --check` queries the project's `.venv` interpreter if it exists.
+    # Redirect uv's project environment to a throwaway path outside the project
+    # so a cloned repo cannot execute `.venv/bin/python`.
+    env = str(Path(tempfile.gettempdir()) / f"pkgradar-lock-{uuid.uuid4().hex}")
+    res = run(
+        [uv_bin(), "lock", "--check"],
+        cwd=project_dir,
+        timeout=120,
+        extra_env={"UV_PROJECT_ENVIRONMENT": env},
+    )
     if res.code == 0:
         return True, None
     if res.code == 127:

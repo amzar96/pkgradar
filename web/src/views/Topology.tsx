@@ -308,6 +308,11 @@ function TopologyInner() {
   const searchTerm = search.trim().toLowerCase();
   const searching = searchTerm.length >= 2;
 
+  const hiddenByDepth = useMemo(() => {
+    if (!project || depthLimit >= 99) return 0;
+    return project.nodes.filter((node) => !node.root && node.depth > depthLimit).length;
+  }, [project, depthLimit]);
+
   const flowNodes = useMemo<Node[]>(() => {
     if (!project) return [];
     const result: Node[] = [];
@@ -320,7 +325,7 @@ function TopologyInner() {
         type: "pkg",
         position: positions[id] ?? { x: 0, y: 0 },
         data: { pkg, highlighted: path.has(id), dimmed } satisfies GraphNodeData,
-        draggable: true,
+        draggable: false,
         selectable: true,
       });
     }
@@ -451,17 +456,17 @@ function TopologyInner() {
             <Maximize2 size={11} />
           </button>
 
-          {project.stats.packages + 1 - flowNodes.length > 0 ? (
+          {hiddenByDepth > 0 ? (
             <button
               onClick={() => setDepthLimit(99)}
               title="Expand every package at every depth"
               className="ml-auto rounded border border-accent/30 bg-accent/10 px-2 py-1 font-mono text-[9.5px] text-accent transition hover:bg-accent/20"
             >
-              +{project.stats.packages + 1 - flowNodes.length} hidden
+              +{hiddenByDepth} hidden
             </button>
           ) : null}
 
-          <span className={`font-mono text-[9.5px] text-dim ${project.stats.packages + 1 - flowNodes.length > 0 ? "" : "ml-auto"}`}>
+          <span className={`font-mono text-[9.5px] text-dim ${hiddenByDepth > 0 ? "" : "ml-auto"}`}>
             {flowNodes.length} nodes · {flowEdges.length} edges
           </span>
         </div>

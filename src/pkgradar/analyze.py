@@ -471,7 +471,12 @@ def compute_skew(projects: list[Project], infos: dict[str, PackageInfo]) -> list
             SkewRow(
                 name=name,
                 latest=info.latest if info and info.available else None,
-                versions={pid: ", ".join(sorted(versions)) for pid, versions in by_project.items()},
+                versions={
+                    pid: ", ".join(
+                        sorted(versions, key=lambda v: parse_version(v) or parse_version("0"))
+                    )
+                    for pid, versions in by_project.items()
+                },
                 spread=len(all_versions),
                 oldest=ordered[0],
                 newest=ordered[-1],

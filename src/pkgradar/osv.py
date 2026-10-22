@@ -9,14 +9,14 @@ import httpx
 
 from .models import Advisory
 from .pypi import CACHE_ROOT, UA
-from .utils import normalize_name, parse_version
+from .utils import normalize_name, parse_version, safe_filename
 
 OSV_TTL = 7 * 86400
 SEVERITY_ORDER = {"CRITICAL": 4, "HIGH": 3, "MODERATE": 2, "MEDIUM": 2, "LOW": 1}
 
 
 def _detail_path(vuln_id: str) -> Path:
-    safe = vuln_id.replace("/", "_")
+    safe = safe_filename(vuln_id)
     return CACHE_ROOT / "osv" / f"{safe}.json"
 
 

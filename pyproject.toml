@@ -21,6 +21,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pkgradar"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/pkgradar/webdist" = "pkgradar/webdist"

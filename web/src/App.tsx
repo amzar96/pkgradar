@@ -5,7 +5,7 @@ import { startScan } from "./api";
 import Inspector from "./components/Inspector";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
-import { useApp } from "./store";
+import { HASH_VIEWS, useApp } from "./store";
 import Conflicts from "./views/Conflicts";
 import Fleet from "./views/Fleet";
 import Packages from "./views/Packages";
@@ -40,6 +40,7 @@ export default function App() {
       {
         onProgress: (data) => useApp.getState().setProgress(data),
         onProject: (project) => useApp.getState().addProject(project),
+        onEnrich: (data) => useApp.getState().setProgress(data),
         onDone: (result) => useApp.getState().finish(result),
         onError: (message) => useApp.getState().fail(message),
       },
@@ -49,10 +50,6 @@ export default function App() {
   useEffect(() => {
     if (bootedRef.current) return;
     bootedRef.current = true;
-    const hash = window.location.hash.replace("#", "");
-    if (["fleet", "topology", "packages", "conflicts", "skew"].includes(hash)) {
-      useApp.setState({ view: hash as "fleet" });
-    }
     fetch("/api/defaults")
       .then((response) => response.json())
       .then((data: { root: string }) => {
@@ -71,9 +68,24 @@ export default function App() {
 
   useEffect(() => {
     if (window.location.hash !== `#${view}`) {
-      window.history.replaceState(null, "", `#${view}`);
+      window.history.pushState(null, "", `#${view}`);
     }
   }, [view]);
+
+  useEffect(() => {
+    const sync = () => {
+      const hash = window.location.hash.replace("#", "") as (typeof HASH_VIEWS)[number];
+      if (HASH_VIEWS.includes(hash)) {
+        useApp.setState({ view: hash });
+      }
+    };
+    window.addEventListener("popstate", sync);
+    window.addEventListener("hashchange", sync);
+    return () => {
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener("hashchange", sync);
+    };
+  }, []);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-ink text-fg">

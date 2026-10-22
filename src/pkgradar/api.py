@@ -1,22 +1,42 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import __version__
 from .scanner import scan
 
 WEB_DIST = Path(__file__).parent / "webdist"
+LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "::1"]
 
 
-def create_app(default_root: Path | None = None) -> FastAPI:
+def create_app(default_root: Path | None = None, *, allow_remote: bool = False) -> FastAPI:
     root_default = (default_root or Path.cwd()).expanduser().resolve()
     app = FastAPI(title="pkgradar", version=__version__, docs_url="/api/docs")
+
+    # Host validation blocks DNS-rebinding: a page on attacker.example cannot
+    # make the browser talk to 127.0.0.1 while claiming to be attacker.example.
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["*"] if allow_remote else LOOPBACK_HOSTS,
+    )
+
+    @app.middleware("http")
+    async def block_cross_site(request, call_next):
+        # A drive-by page can still send no-cors requests to localhost. Reject
+        # browser requests that are not same-origin; curl and other non-browser
+        # clients do not send Sec-Fetch-Site and keep working.
+        site = request.headers.get("sec-fetch-site")
+        if request.url.path.startswith("/api/") and site not in (None, "same-origin", "none"):
+            return JSONResponse({"error": "cross-site request blocked"}, status_code=403)
+        return await call_next(request)
 
     @app.get("/api/health")
     async def health() -> dict:
@@ -33,7 +53,10 @@ def create_app(default_root: Path | None = None) -> FastAPI:
 
     def _root(value: str | None) -> Path:
         path = Path(value).expanduser() if value else root_default
-        return path.resolve()
+        path = path.resolve()
+        if not path.is_dir():
+            raise HTTPException(status_code=400, detail=f"not a directory: {path}")
+        return path
 
     @app.get("/api/scan")
     async def scan_stream(
@@ -78,6 +101,8 @@ def create_app(default_root: Path | None = None) -> FastAPI:
             finally:
                 if not task.done():
                     task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
 
         return StreamingResponse(
             generator(),
@@ -102,14 +127,6 @@ def create_app(default_root: Path | None = None) -> FastAPI:
             deep=deep,
         )
         return JSONResponse(result.model_dump(mode="json"))
-
-    @app.get("/api/file")
-    async def file(path: str) -> FileResponse:
-        # Only allow files that exist; the UI uses this for "open in editor" links.
-        target = Path(path).expanduser().resolve()
-        if not target.exists() or target.is_dir():
-            return JSONResponse({"error": "not found"}, status_code=404)
-        return FileResponse(target, media_type="text/plain")
 
     if (WEB_DIST / "index.html").exists():
         app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")

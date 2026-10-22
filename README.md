@@ -70,6 +70,9 @@ mostly PyPI/OSV network time. Results are cached under `~/.cache/pkgradar`.
 
 ### Flags
 
+These apply to `scan` and `tui`; `serve` takes `root`, `--host`, `--port`, `--open` and
+`--allow-remote`.
+
 | Flag | Effect |
 | --- | --- |
 | `--offline` | Use cached PyPI data only, no network |
@@ -86,12 +89,12 @@ Hash-routed views, all backed by one `/api/scan` SSE stream:
   compact grid), `radial`, `compact`, `layered`. Depth selector (`1…all`), group filter, outdated /
   advisory filters, search dimming, path highlight to the selected node, `+N hidden` to expand.
 - **`#packages`** — sortable table: locked, latest, semver delta, CVEs, risk, dependents, installed, depth.
-- **`#conflicts`** — constraint intersections and lock/venv drift, each with the blame chain.
+- **`#conflicts`** — constraint intersections and lock/venv drift; range conflicts include the blame chain.
 - **`#skew`** — one row per package, one column per project.
 
 The graph reads from the **lockfile** (resolution truth) and reconciles against **installed
-`dist-info` metadata** (environment truth). When the two disagree, nodes are marked
-`missing` / `extra` / `version` and counted as drift.
+`dist-info` metadata** (environment truth). When the two disagree, nodes are marked `missing` or
+`version`; installed-only packages are reported as project-level drift.
 
 ## Terminal UI
 
@@ -100,9 +103,9 @@ The graph reads from the **lockfile** (resolution truth) and reconciles against 
 ```
 
 - **Fleet** — project table with venv interpreter, lock state, drift.
-- **Topology** — collapsible dependency tree per project; highlighting a package shows latest
-  version, delta, installed version, risk factors, advisories (with fixed-in), and every package
-  that requires it.
+- **Topology** — collapsible dependency tree per project (capped at 2,000 nodes and depth 10);
+  highlighting a package shows latest version, delta, installed version, risk factors, advisories
+  (with fixed-in), and every package that requires it.
 - **Conflicts / Skew** — the same data as the web tables.
 
 Scanning happens in a background worker, so the UI stays responsive; `r` re-runs it.
@@ -112,13 +115,32 @@ Scanning happens in a background worker, so the UI stays responsive; `r` re-runs
 pkgradar never mutates your projects. It only runs:
 
 - `uv lock --check` (whether the lock matches `pyproject.toml`)
-- `uv sync --dry-run` (planned installs/uninstalls — advisory only)
-- `uv pip list` / `uv pip check` (installed truth, environment consistency)
+- `uv sync --dry-run` (planned installs/uninstalls — advisory only, and only when the venv is trusted)
 - plain reads of `uv.lock`, `pyproject.toml`, and `.venv/**/dist-info/METADATA`
 
 No `uv add`, `uv lock`, `uv sync`, or `pip install` is ever invoked. The scanner also strips
 `VIRTUAL_ENV`, `CONDA_PREFIX` and `PYTHONHOME` from child processes so a scan can't be redirected
 into the wrong environment.
+
+### Scanning untrusted code
+
+A cloned repository can ship an executable at `.venv/bin/python`, and `uv` queries that interpreter
+even for `lock --check` / `sync --dry-run`. pkgradar therefore:
+
+- runs `uv lock --check` with `UV_PROJECT_ENVIRONMENT` pointed at a throwaway path outside the
+  project, so uv never touches the project interpreter;
+- never runs `uv pip list` / `uv pip check` (installed versions come from `dist-info`);
+- skips `uv sync --dry-run` unless `.venv/bin/python` is a symlink that resolves outside the project
+  (the normal POSIX venv layout). Windows venvs copy `python.exe`, so the sync plan is skipped there.
+
+### Localhost trust model
+
+`pkgradar serve` binds `127.0.0.1` and validates the `Host` header, which blocks DNS-rebinding
+attacks from web pages. API requests carrying `Sec-Fetch-Site: cross-site` (or `same-site`) are
+rejected, so a random website cannot drive-by trigger scans. The server has **no authentication**:
+binding a non-loopback interface requires `--allow-remote` and exposes the read-only scanner (and
+your local paths/package names) to your network. Put it behind an authenticating proxy if you need
+remote access.
 
 ## How it works
 
@@ -126,13 +148,13 @@ into the wrong environment.
 src/pkgradar/
   discover.py   walk a root, find uv projects (pyproject + uv.lock + .venv)
   locks.py      parse uv.lock into nodes/edges; workspace + group handling
-  venvs.py      dist-info METADATA, uv pip list/check, drift + sync plan
+  venvs.py      dist-info METADATA, drift + sync plan (no interpreter execution)
   graph.py      BFS depths, orphans, cycles, root edges
   analyze.py    constraint intervals, conflict blame, risk score, cross-project skew
   pypi.py       PyPI JSON (latest, upload date, yanked/deprecated), disk cache
   osv.py        OSV querybatch advisories, per-package
   scanner.py    orchestration; emits progress/project/enrich/done events
-  api.py        FastAPI + SSE + static web bundle
+  api.py        FastAPI + SSE + static web bundle + loopback guards
   cli.py        scan / serve / tui
   tui.py        Textual app
 web/            React 19 + Vite + Tailwind v4 + @xyflow/react + elkjs + zustand
@@ -161,5 +183,8 @@ cd .. && uv run pkgradar serve --open
   conflicts across mutually exclusive marker branches are intentionally not reported.
 - PyPI/OSV enrichment is best-effort (cache + rate limits); use `--offline` for deterministic scans.
 - `uv sync --dry-run` output is advisory — pkgradar reports what uv *would* do, it never runs it.
+  Plans are skipped when the project interpreter is not a trusted symlink (e.g. Windows venvs).
+- Environment compatibility (`uv pip check`) is not evaluated, because it executes the project
+  interpreter; the venv check field is reported as `unknown`.
 - Projects with dozens of direct dependencies get dense overviews; use depth, group and search
   filters, or the compact/layered layouts.

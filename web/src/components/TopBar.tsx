@@ -25,13 +25,14 @@ export default function TopBar({ onRescan }: Props) {
   const result = useApp((state) => state.result);
   const offline = useApp((state) => state.offline);
   const deep = useApp((state) => state.deep);
+  const search = useApp((state) => state.search);
+  const setSearch = useApp((state) => state.setSearch);
   const setOffline = useApp((state) => state.setOffline);
   const setDeep = useApp((state) => state.setDeep);
   const selectProject = useApp((state) => state.selectProject);
   const selectNode = useApp((state) => state.selectNode);
   const setView = useApp((state) => state.setView);
 
-  const [search, setSearch] = useState("");
   const [editingRoot, setEditingRoot] = useState(false);
   const [rootDraft, setRootDraft] = useState(root);
   const [focused, setFocused] = useState(false);

@@ -32,12 +32,8 @@ DELTA = {
 }
 
 
-def _ref(node: PackageNode) -> str:
-    return f"{escape(node.name)}@{node.version}"
-
-
 def _node_label(node: PackageNode) -> str:
-    bits = [f"[bold]{escape(node.name)}[/bold]", f"[dim]{node.version}[/dim]"]
+    bits = [f"[bold]{escape(node.name)}[/bold]", f"[dim]{escape(node.version)}[/dim]"]
     if node.root:
         bits.append("[cyan]project[/cyan]")
     elif node.delta in ("major", "minor", "patch", "other"):
@@ -111,6 +107,7 @@ class PkgRadarApp(App):
         self.result: ScanResult | None = None
         self._incoming: dict[str, dict[str, list[Any]]] = {}
         self._tree_budget = 0
+        self._scan_generation = 0
 
     # ------------------------------------------------------------------ layout
     def compose(self) -> ComposeResult:
@@ -148,10 +145,12 @@ class PkgRadarApp(App):
     # ------------------------------------------------------------------- scan
     @work(thread=True, exclusive=True)
     def scan(self) -> None:
+        self._scan_generation += 1
+        generation = self._scan_generation
         self.call_from_thread(self._set_status, f"scanning {self.root} …")
 
         def progress(event: str, data: dict[str, Any]) -> None:
-            if event != "progress":
+            if event != "progress" or generation != self._scan_generation:
                 return
             message = data.get("message") or data.get("phase") or ""
             done, total = data.get("done"), data.get("total")
@@ -168,7 +167,10 @@ class PkgRadarApp(App):
                 on_event=progress,
             )
         except Exception as error:  # pragma: no cover - surfaced in the UI
-            self.call_from_thread(self._fail, error)
+            if generation == self._scan_generation:
+                self.call_from_thread(self._fail, error)
+            return
+        if generation != self._scan_generation:
             return
         self.call_from_thread(self._apply, result)
 
@@ -209,18 +211,26 @@ class PkgRadarApp(App):
         for project in result.projects:
             lock = "—"
             if project.lock.exists:
-                lock = "ok" if project.lock.stale is not False else (
-                    "stale" if project.lock.stale is False else "?"
-                )
-            venv = "broken" if project.venv.broken else (project.venv.python or "none")
+                if project.lock.stale is True:
+                    lock = "ok"
+                elif project.lock.stale is False:
+                    lock = "stale"
+                else:
+                    lock = "?"
+            if project.venv.broken:
+                venv = "broken"
+            elif project.venv.exists:
+                venv = project.venv.python or "?"
+            else:
+                venv = "none"
             table.add_row(
-                project.rel_path,
+                escape(project.rel_path),
                 str(project.stats.packages),
                 str(project.stats.outdated),
                 f"[red]{project.stats.major}[/red]" if project.stats.major else "0",
                 f"[red]{project.stats.advisories}[/red]" if project.stats.advisories else "0",
                 f"[magenta]{project.stats.drift}[/magenta]" if project.stats.drift else "0",
-                venv,
+                escape(venv),
                 lock,
                 key=project.id,
             )
@@ -260,7 +270,7 @@ class PkgRadarApp(App):
         for row in result.skew:
             items = list(row.versions.items())
             versions = "  ".join(
-                f"[cyan]{escape(pid)}[/cyan]={version}" for pid, version in items[:4]
+                f"[cyan]{escape(pid)}[/cyan]={escape(version)}" for pid, version in items[:4]
             )
             if len(items) > 4:
                 versions += f"  [dim]+{len(items) - 4} more[/dim]"
@@ -286,7 +296,7 @@ class PkgRadarApp(App):
             self._incoming[project.id] = incoming
             project_node = tree.root.add(
                 f"[bold]{escape(project.rel_path)}[/bold] "
-                f"[dim]{project.version} · {project.stats.packages} pkgs[/dim]",
+                f"[dim]{escape(project.version)} · {project.stats.packages} pkgs[/dim]",
                 data={"project": project, "node": None},
                 expand=project is result.projects[0],
             )
@@ -343,7 +353,7 @@ class PkgRadarApp(App):
     def _show_project(self, project: Project) -> None:
         stats = project.stats
         lines = [
-            f"[bold]{escape(project.rel_path)}[/bold]  [dim]{project.version}[/dim]",
+            f"[bold]{escape(project.rel_path)}[/bold]  [dim]{escape(project.version)}[/dim]",
             f"[dim]{escape(project.path)}[/dim]",
             "",
             f"[bold]{stats.packages}[/bold] packages · [bold]{stats.direct}[/bold] direct · "
@@ -353,11 +363,11 @@ class PkgRadarApp(App):
             f"[magenta]{stats.drift}[/magenta] drift · "
             f"[cyan]{stats.conflicts}[/cyan] conflicts",
             "",
-            f"venv  [dim]{escape(project.venv.python or 'none')}[/dim]"
+            f"venv  [dim]{escape(project.venv.python or ('?' if project.venv.exists else 'none'))}[/dim]"
             f"  ({project.venv.installed} installed)",
             f"lock  [dim]{'present' if project.lock.exists else 'missing'}[/dim]"
             f"  ({project.lock.packages} packages"
-            f"{', stale' if project.lock.stale is False else ''})",
+            f"{', stale' if project.lock.stale is False else ', unknown' if project.lock.stale is None and project.lock.exists else ''})",
         ]
         if project.venv.broken:
             lines.append("[red]venv interpreter is broken[/red]")
@@ -366,7 +376,7 @@ class PkgRadarApp(App):
     def _show_node(self, project: Project, node: PackageNode) -> None:
         delta = DELTA.get(node.delta, "dim")
         lines = [
-            f"[bold]{escape(node.name)}[/bold]  [dim]{node.version}[/dim]",
+            f"[bold]{escape(node.name)}[/bold]  [dim]{escape(node.version)}[/dim]",
             f"[dim]{escape(project.rel_path)} · {escape(node.group)} · "
             f"depth {node.depth}{' · direct' if node.direct else ''}[/dim]",
             "",
@@ -374,14 +384,18 @@ class PkgRadarApp(App):
         if node.latest:
             change = f"[{delta}]{node.delta}[/]" if node.delta not in ("none", "unknown") else "[green]current[/green]"
             behind = f" · {node.releases_behind} behind" if node.releases_behind else ""
-            lines.append(f"latest   [bold]{node.latest}[/bold]  {change}{behind}")
+            lines.append(f"latest   [bold]{escape(node.latest)}[/bold]  {change}{behind}")
         else:
             lines.append("latest   [dim]unknown[/dim]")
         if node.installed_version:
             lines.append(
-                f"installed [bold]{node.installed_version}[/bold]  "
+                f"installed [bold]{escape(node.installed_version)}[/bold]  "
                 f"[magenta]{node.drift or 'same'}[/magenta]"
             )
+        elif node.drift == "missing":
+            lines.append("installed [red]missing from venv[/red]")
+        else:
+            lines.append("installed [dim]not scanned[/dim]")
         lines.append(f"weight   {_bar(node.risk)}  {node.risk:.2f} · {node.dependents} dependents")
         if node.license:
             lines.append(f"license  [dim]{escape(node.license)}[/dim]")
@@ -410,7 +424,7 @@ class PkgRadarApp(App):
             if len(node.advisories) > 6:
                 lines.append(f"  [dim]+{len(node.advisories) - 6} more[/dim]")
             if node.fixed_in:
-                lines.append(f"  [green]fixed in {node.fixed_in}[/green]")
+                lines.append(f"  [green]fixed in {escape(node.fixed_in)}[/green]")
 
         incoming = self._incoming.get(project.id, {}).get(node.id, [])
         if incoming:

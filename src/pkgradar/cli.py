@@ -32,10 +32,15 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser.add_argument("--quiet", action="store_true", help="only print the JSON")
 
     serve_parser = sub.add_parser("serve", help="start the web UI")
-    _add_scan_flags(serve_parser)
+    serve_parser.add_argument("root", nargs="?", default=None, help="directory to scan (default: cwd)")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=6767)
     serve_parser.add_argument("--open", action="store_true", help="open a browser")
+    serve_parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="allow binding a non-loopback host (exposes the UI to your network)",
+    )
 
     tui_parser = sub.add_parser("tui", help="start the terminal UI")
     _add_scan_flags(tui_parser)
@@ -61,13 +66,14 @@ def _root(value: str | None) -> Path:
 
 def _scan(args: argparse.Namespace) -> int:
     from rich.console import Console
+    from rich.markup import escape
 
     from .scanner import scan_sync
 
     console = Console()
     root = _root(args.root)
     if not args.quiet:
-        console.print(f"[bold]pkgradar[/bold] scanning [cyan]{root}[/cyan]")
+        console.print(f"[bold]pkgradar[/bold] scanning [cyan]{escape(str(root))}[/cyan]")
     result = scan_sync(
         root,
         offline=args.offline,
@@ -81,7 +87,7 @@ def _scan(args: argparse.Namespace) -> int:
             json.dumps(result.model_dump(mode="json"), indent=2)
         )
         if not args.quiet:
-            console.print(f"wrote [cyan]{args.json_out}[/cyan]")
+            console.print(f"wrote [cyan]{escape(args.json_out)}[/cyan]")
 
     if not args.quiet:
         _print_report(console, result)
@@ -91,6 +97,7 @@ def _scan(args: argparse.Namespace) -> int:
 
 
 def _print_report(console, result) -> None:
+    from rich.markup import escape
     from rich.table import Table
 
     stats = result.stats
@@ -116,17 +123,22 @@ def _print_report(console, result) -> None:
             if project.venv.broken
             else (project.venv.python or "none")
         )
-        lock = "ok" if project.lock.exists and project.lock.stale is not False else (
-            "stale" if project.lock.stale is False else ("none" if not project.lock.exists else "?")
-        )
+        if not project.lock.exists:
+            lock = "none"
+        elif project.lock.stale is True:
+            lock = "ok"
+        elif project.lock.stale is False:
+            lock = "stale"
+        else:
+            lock = "?"
         table.add_row(
-            project.rel_path,
+            escape(project.rel_path),
             str(project.stats.packages),
             str(project.stats.outdated),
             str(project.stats.major),
             str(project.stats.advisories),
             str(project.stats.drift),
-            venv,
+            escape(venv),
             lock,
         )
     console.print(table)
@@ -134,8 +146,12 @@ def _print_report(console, result) -> None:
     if result.skew:
         console.print("\n[bold]Version skew across projects[/bold]")
         for row in result.skew[:8]:
-            versions = ", ".join(f"{pid}={v}" for pid, v in list(row.versions.items())[:4])
-            console.print(f"  [cyan]{row.name}[/cyan] ({row.spread} versions) {versions}")
+            versions = ", ".join(
+                f"{escape(pid)}={escape(v)}" for pid, v in list(row.versions.items())[:4]
+            )
+            console.print(
+                f"  [cyan]{escape(row.name)}[/cyan] ({row.spread} versions) {versions}"
+            )
 
     if result.conflicts:
         console.print("\n[bold]Conflicts[/bold]")
@@ -144,13 +160,14 @@ def _print_report(console, result) -> None:
                 conflict.severity, "white"
             )
             console.print(
-                f"  [{colour}]{conflict.severity:<6}[/{colour}] [cyan]{conflict.project_id}[/cyan] "
-                f"{conflict.title}"
+                f"  [{colour}]{conflict.severity:<6}[/{colour}] "
+                f"[cyan]{escape(conflict.project_id)}[/cyan] {escape(conflict.title)}"
             )
             for blame in conflict.blame[:4]:
                 console.print(
-                    f"           {blame.parent} requires {blame.spec or 'any'} "
-                    f"(resolved {blame.resolved or '?'})"
+                    f"           {escape(blame.parent)} requires "
+                    f"{escape(blame.spec or 'any')} "
+                    f"(resolved {escape(blame.resolved or '?')})"
                 )
 
 
@@ -159,8 +176,23 @@ def _serve(args: argparse.Namespace) -> int:
 
     from .api import create_app
 
+    loopback = args.host in {"127.0.0.1", "localhost", "::1"}
+    if not loopback and not args.allow_remote:
+        print(
+            f"refusing to bind {args.host}: pass --allow-remote to expose pkgradar "
+            "on a non-loopback interface",
+            file=sys.stderr,
+        )
+        return 2
+    if not loopback:
+        print(
+            f"warning: binding {args.host} exposes an unauthenticated, read-only "
+            "dependency scanner to your network",
+            file=sys.stderr,
+        )
+
     root = _root(args.root)
-    app = create_app(root)
+    app = create_app(root, allow_remote=not loopback)
     url = f"http://{args.host}:{args.port}"
     print(f"pkgradar {__version__} -> {url}  (root: {root})")
     if args.open:

@@ -17,6 +17,21 @@ const DELTA_RANK: Record<string, number> = {
   none: 0,
 };
 
+function compareVersions(a: string, b: string): number {
+  const split = (value: string) =>
+    value.split(/[.+-]/).map((part) => {
+      const number = Number.parseInt(part, 10);
+      return Number.isNaN(number) ? 0 : number;
+    });
+  const left = split(a);
+  const right = split(b);
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const diff = (left[index] ?? 0) - (right[index] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return a.localeCompare(b);
+}
+
 export default function Packages() {
   const project = useActiveProject();
   const selectedNode = useApp((state) => state.selectedNode);
@@ -46,7 +61,7 @@ export default function Packages() {
         case "name":
           return a.name.localeCompare(b.name) * direction;
         case "version":
-          return a.version.localeCompare(b.version) * direction;
+          return compareVersions(a.version, b.version) * direction;
         case "delta":
           return ((DELTA_RANK[a.delta] ?? 0) - (DELTA_RANK[b.delta] ?? 0)) * direction;
         case "advisories":
@@ -254,8 +269,10 @@ function Row({
             {node.installed_version}
             {node.drift === "version" ? " ≠" : ""}
           </span>
-        ) : (
+        ) : node.drift === "missing" ? (
           <span className="text-major/70">missing</span>
+        ) : (
+          <span className="text-dim">—</span>
         )}
       </td>
       <td className="px-3 py-1.5 font-mono text-[10px] text-dim">{node.depth}</td>

@@ -99,7 +99,7 @@ def _declared_graph(project_name: str, version: str, pyproject: dict):
     return nodes, edges, stats
 
 
-def _build_project(discovered: DiscoveredProject, deep: bool) -> tuple[Project, str | None]:
+def _build_project(discovered: DiscoveredProject, deep: bool) -> Project:
     pyproject_path = discovered.pyproject
     pyproject = _read_toml(pyproject_path)
     project = Project(
@@ -111,7 +111,6 @@ def _build_project(discovered: DiscoveredProject, deep: bool) -> tuple[Project, 
         python_requires=discovered.python_requires,
         groups=discovered.groups or ["main"],
     )
-    resolver_raw: str | None = None
 
     if discovered.lock:
         nodes, edges, stats, lock_info = load_lock(
@@ -120,10 +119,10 @@ def _build_project(discovered: DiscoveredProject, deep: bool) -> tuple[Project, 
         project.nodes, project.edges, project.stats = nodes, edges, stats
         project.lock = lock_info
         if deep:
-            stale, raw = lock_check(discovered.path)
-            project.lock.stale = stale
-            if stale is False:
-                resolver_raw = raw
+            # A stale lock is not a resolver failure: `uv lock --check` only
+            # says the lock needs regenerating, so it must not become a
+            # high-severity "cannot resolve" conflict.
+            project.lock.stale, _ = lock_check(discovered.path)
     elif discovered.pyproject:
         nodes, edges, stats = _declared_graph(discovered.name, discovered.version, pyproject)
         project.nodes, project.edges, project.stats = nodes, edges, stats
@@ -140,15 +139,17 @@ def _build_project(discovered: DiscoveredProject, deep: bool) -> tuple[Project, 
                 enrich_edge_specs(project.nodes, project.edges, state)
                 reconcile_drift(project, DriftPlan())
                 if deep:
-                    project.drift.plan, plan_raw = sync_plan(discovered.path)
+                    project.drift.plan, plan_raw = sync_plan(
+                        discovered.path, discovered.venv
+                    )
                     if plan_raw and not project.drift.plan.raw:
                         project.drift.plan.raw = plan_raw
                     reconcile_drift(project, project.drift.plan)
             elif not discovered.lock:
                 project.drift = Drift()
 
-    collect_conflicts(project, {}, resolver_raw)
-    return project, resolver_raw
+    collect_conflicts(project, {}, None)
+    return project
 
 
 async def scan(
@@ -177,7 +178,6 @@ async def scan(
     )
 
     projects: list[Project] = []
-    resolver_raws: dict[str, str | None] = {}
     for index, item in enumerate(discovered):
         await _emit(
             on_event,
@@ -190,11 +190,10 @@ async def scan(
             },
         )
         try:
-            project, resolver_raw = await asyncio.to_thread(_build_project, item, deep)
+            project = await asyncio.to_thread(_build_project, item, deep)
         except Exception as exc:  # pragma: no cover - defensive
             warnings.append(f"{item.rel_path}: {exc}")
             continue
-        resolver_raws[project.id] = resolver_raw
         projects.append(project)
         await _emit(on_event, "project", {"project": project.model_dump(mode="json")})
 
@@ -259,7 +258,7 @@ async def scan(
         collect_conflicts(
             project,
             {name: info.versions for name, info in infos.items()},
-            resolver_raw=resolver_raws.get(project.id),
+            resolver_raw=None,
         )
         for node in project.nodes:
             score_risk(node)

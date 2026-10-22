@@ -22,12 +22,19 @@ def uv_bin() -> str:
     return shutil.which("uv") or "uv"
 
 
-def run(cmd: list[str], cwd: Path | None = None, timeout: int = 120) -> ProcResult:
+def run(
+    cmd: list[str],
+    cwd: Path | None = None,
+    timeout: int = 120,
+    extra_env: dict[str, str] | None = None,
+) -> ProcResult:
     env = dict(os.environ)
     # A parent `uv run` exports VIRTUAL_ENV; uv would otherwise warn/ignore the
     # project environment we are explicitly inspecting.
     for key in ("VIRTUAL_ENV", "CONDA_PREFIX", "PYTHONHOME"):
         env.pop(key, None)
+    if extra_env:
+        env.update(extra_env)
     try:
         proc = subprocess.run(
             cmd,

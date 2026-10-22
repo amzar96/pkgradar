@@ -13,6 +13,13 @@ def normalize_name(name: str) -> str:
     return _NORM_RE.sub("-", name).strip().lower()
 
 
+def safe_filename(value: str, *, lower: bool = False) -> str:
+    """Turn an untrusted package name / advisory id into a single path segment."""
+    text = value.lower() if lower else value
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("._")
+    return safe or "unknown"
+
+
 def parse_version(value: str | None) -> Version | None:
     if not value:
         return None
