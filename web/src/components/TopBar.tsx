@@ -2,20 +2,25 @@ import {
   ChevronDown,
   FolderOpen,
   Gauge,
+  Moon,
   RefreshCw,
   Search,
+  Server,
+  Sun,
   WifiOff,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { useApp } from "../store";
-import type { PackageNode, Project } from "../types";
+import type { IndexRef, PackageNode, Project } from "../types";
 import { HealthDot, Pill } from "./primitives";
 
 interface Props {
   onRescan: (root?: string) => void;
 }
+
+const EMPTY_INDEXES: IndexRef[] = [];
 
 export default function TopBar({ onRescan }: Props) {
   const root = useApp((state) => state.root);
@@ -25,10 +30,15 @@ export default function TopBar({ onRescan }: Props) {
   const result = useApp((state) => state.result);
   const offline = useApp((state) => state.offline);
   const deep = useApp((state) => state.deep);
+  const theme = useApp((state) => state.theme);
+  const toggleTheme = useApp((state) => state.toggleTheme);
   const search = useApp((state) => state.search);
   const setSearch = useApp((state) => state.setSearch);
   const setOffline = useApp((state) => state.setOffline);
   const setDeep = useApp((state) => state.setDeep);
+  const resultIndexes = useApp((state) => state.result?.indexes);
+  const indexes = resultIndexes ?? EMPTY_INDEXES;
+  const primaryIndex = indexes.find((index) => index.primary) ?? indexes[0];
   const selectProject = useApp((state) => state.selectProject);
   const selectNode = useApp((state) => state.selectNode);
   const setView = useApp((state) => state.setView);
@@ -55,8 +65,10 @@ export default function TopBar({ onRescan }: Props) {
 
   useEffect(() => setRootDraft(root), [root]);
 
+  const deferredSearch = useDeferredValue(search);
+
   const matches = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = deferredSearch.trim().toLowerCase();
     if (term.length < 2) return [];
     const hits: { project: Project; node: PackageNode }[] = [];
     for (const project of projects) {
@@ -67,19 +79,20 @@ export default function TopBar({ onRescan }: Props) {
       }
     }
     return hits.sort((a, b) => a.node.depth - b.node.depth).slice(0, 9);
-  }, [search, projects]);
+  }, [deferredSearch, projects]);
 
   const scanning = status === "scanning";
   const pct = progress.total ? Math.min(100, (progress.done / progress.total) * 100) : 0;
 
   return (
-    <header className="relative z-30 flex h-[54px] shrink-0 items-center gap-3 border-b border-line bg-[#090c11]/90 px-4 backdrop-blur">
+    <header className="relative z-30 flex h-[54px] shrink-0 items-center gap-3 border-b border-line bg-header px-4 backdrop-blur">
       <div className="relative flex items-center">
         {editingRoot ? (
           <div className="flex items-center gap-1.5 rounded-md border border-accent/40 bg-panel2 px-2 py-1">
             <FolderOpen size={13} className="text-accent" />
             <input
               autoFocus
+              aria-label="Scan root"
               value={rootDraft}
               onChange={(event) => setRootDraft(event.target.value)}
               onKeyDown={(event) => {
@@ -99,7 +112,7 @@ export default function TopBar({ onRescan }: Props) {
           <button
             onClick={() => setEditingRoot(true)}
             title="Change scan root"
-            className="group flex max-w-[430px] items-center gap-2 rounded-md border border-line bg-panel px-2.5 py-1.5 transition hover:border-line2"
+            className="group flex max-w-[430px] items-center gap-2 rounded-md border border-line bg-panel px-2.5 py-1.5 transition-colors hover:border-line2"
           >
             <FolderOpen size={13} className="shrink-0 text-dim group-hover:text-accent" />
             <span className="truncate font-mono text-[11px] text-muted">{root || "scanning…"}</span>
@@ -110,13 +123,14 @@ export default function TopBar({ onRescan }: Props) {
 
       <div className="relative flex-1" style={{ maxWidth: 420 }}>
         <div
-          className={`flex items-center gap-2 rounded-md border bg-panel px-2.5 py-1.5 transition ${
+          className={`flex items-center gap-2 rounded-md border bg-panel px-2.5 py-1.5 transition-colors ${
             focused ? "border-accent/40" : "border-line"
           }`}
         >
           <Search size={13} className="text-dim" />
           <input
             ref={inputRef}
+            aria-label="Search packages across projects"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             onFocus={() => setFocused(true)}
@@ -162,10 +176,29 @@ export default function TopBar({ onRescan }: Props) {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {primaryIndex ? (
+          <span
+            className="hidden max-w-[180px] items-center gap-1 truncate rounded-md border border-line bg-panel px-2 py-1.5 font-mono text-[10px] text-dim lg:flex"
+            title={`${primaryIndex.name} · ${primaryIndex.url}`}
+          >
+            <Server size={11} className="shrink-0" />
+            <span className="truncate">{primaryIndex.name}</span>
+          </span>
+        ) : null}
+        <button
+          onClick={toggleTheme}
+          title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          aria-pressed={theme === "light"}
+          className="flex items-center rounded-md border border-line bg-panel px-2 py-1.5 text-dim transition-colors hover:text-fg"
+        >
+          {theme === "dark" ? <Sun size={12} /> : <Moon size={12} />}
+        </button>
         <button
           onClick={() => setOffline(!offline)}
           title="Offline: use cached PyPI metadata only"
-          className={`flex items-center gap-1 rounded-md border px-2 py-1.5 text-[10px] transition ${
+          aria-pressed={offline}
+          className={`flex items-center gap-1 rounded-md border px-2 py-1.5 text-[10px] transition-colors ${
             offline
               ? "border-accent/40 bg-accent/10 text-accent"
               : "border-line bg-panel text-dim hover:text-muted"
@@ -177,7 +210,8 @@ export default function TopBar({ onRescan }: Props) {
         <button
           onClick={() => setDeep(!deep)}
           title="Deep: run uv lock --check and uv sync --dry-run (read-only)"
-          className={`flex items-center gap-1 rounded-md border px-2 py-1.5 text-[10px] transition ${
+          aria-pressed={deep}
+          className={`flex items-center gap-1 rounded-md border px-2 py-1.5 text-[10px] transition-colors ${
             deep
               ? "border-accent/40 bg-accent/10 text-accent"
               : "border-line bg-panel text-dim hover:text-muted"
@@ -205,7 +239,8 @@ export default function TopBar({ onRescan }: Props) {
         <button
           onClick={() => onRescan()}
           disabled={scanning}
-          className="flex items-center gap-1.5 rounded-md border border-line bg-panel px-2.5 py-1.5 text-[11px] text-muted transition hover:border-line2 hover:text-fg disabled:opacity-40"
+          aria-label="Rescan projects"
+          className="flex items-center gap-1.5 rounded-md border border-line bg-panel px-2.5 py-1.5 text-[11px] text-muted transition-colors hover:border-line2 hover:text-fg disabled:opacity-40"
         >
           <RefreshCw size={12} className={scanning ? "animate-spin" : ""} />
           rescan

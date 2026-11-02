@@ -1,19 +1,24 @@
 import { Radar, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useRef } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
 
 import { startScan } from "./api";
 import Inspector from "./components/Inspector";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
+import { applyTheme } from "./lib/theme";
 import { HASH_VIEWS, useApp } from "./store";
 import Conflicts from "./views/Conflicts";
 import Fleet from "./views/Fleet";
 import Packages from "./views/Packages";
 import Skew from "./views/Skew";
-import Topology from "./views/Topology";
+
+// React Flow + ELK only load when the topology view is opened. This keeps the
+// initial Fleet/Packages bundle small.
+const Topology = lazy(() => import("./views/Topology"));
 
 export default function App() {
   const view = useApp((state) => state.view);
+  const theme = useApp((state) => state.theme);
   const status = useApp((state) => state.status);
   const error = useApp((state) => state.error);
   const projects = useApp((state) => state.projects);
@@ -22,6 +27,10 @@ export default function App() {
 
   const cancelRef = useRef<(() => void) | null>(null);
   const bootedRef = useRef(false);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   const runScan = useCallback((root?: string) => {
     const state = useApp.getState();
@@ -94,11 +103,13 @@ export default function App() {
         <TopBar onRescan={runScan} />
         <div className="flex min-h-0 flex-1">
           <main className="relative min-w-0 flex-1">
-            {view === "fleet" ? <Fleet /> : null}
-            {view === "topology" ? <Topology /> : null}
-            {view === "packages" ? <Packages /> : null}
-            {view === "conflicts" ? <Conflicts /> : null}
-            {view === "skew" ? <Skew /> : null}
+            <Suspense fallback={<ViewLoading />}>
+              {view === "fleet" ? <Fleet /> : null}
+              {view === "topology" ? <Topology /> : null}
+              {view === "packages" ? <Packages /> : null}
+              {view === "conflicts" ? <Conflicts /> : null}
+              {view === "skew" ? <Skew /> : null}
+            </Suspense>
 
             {status === "scanning" && projects.length === 0 ? (
               <ScanOverlay
@@ -134,6 +145,14 @@ export default function App() {
   );
 }
 
+function ViewLoading() {
+  return (
+    <div className="flex h-full items-center justify-center text-[11px] text-dim">
+      <span className="pulse-soft">loading view…</span>
+    </div>
+  );
+}
+
 function ScanOverlay({
   message,
   phase,
@@ -148,7 +167,7 @@ function ScanOverlay({
   const phases = [
     { id: "discover", label: "Discovering uv projects" },
     { id: "parse", label: "Parsing uv.lock + .venv" },
-    { id: "pypi", label: "Resolving latest releases on PyPI" },
+    { id: "pypi", label: "Resolving latest releases from the package index" },
     { id: "osv", label: "Checking OSV advisories" },
   ];
   const activeIndex = Math.max(
@@ -158,7 +177,11 @@ function ScanOverlay({
   const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
 
   return (
-    <div className="scanline absolute inset-0 flex items-center justify-center bg-ink/85 backdrop-blur-sm">
+    <div
+      className="scanline absolute inset-0 flex items-center justify-center bg-ink/85 backdrop-blur-sm"
+      role="status"
+      aria-live="polite"
+    >
       <div className="w-[360px]">
         <div className="relative mx-auto mb-6 h-[92px] w-[92px]">
           {[0, 1, 2].map((ring) => (
@@ -222,7 +245,7 @@ function ScanOverlay({
         </div>
 
         <p className="mt-5 text-center text-[9.5px] leading-relaxed text-dim">
-          First run queries PyPI and OSV for every package — cached for 24h afterwards.
+          First run queries the configured package index and OSV — cached for 24h afterwards.
         </p>
       </div>
     </div>

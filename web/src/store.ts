@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { applyTheme, initialTheme, persistTheme, type Theme } from "./lib/theme";
 import type { Project, ScanResult, View } from "./types";
 
 type Status = "idle" | "scanning" | "ready" | "error";
@@ -21,6 +22,7 @@ interface Progress {
 
 interface AppState {
   view: View;
+  theme: Theme;
   status: Status;
   progress: Progress;
   error: string | null;
@@ -41,6 +43,8 @@ interface AppState {
   inspectorOpen: boolean;
 
   setView: (view: View) => void;
+  setTheme: (theme: Theme) => void;
+  toggleTheme: () => void;
   beginScan: (root: string) => void;
   addProject: (project: Project) => void;
   setProgress: (progress: Progress) => void;
@@ -63,6 +67,7 @@ interface AppState {
 
 export const useApp = create<AppState>((set, get) => ({
   view: initialView(),
+  theme: initialTheme(),
   status: "idle",
   progress: { phase: "", message: "", done: 0, total: 0 },
   error: null,
@@ -83,6 +88,17 @@ export const useApp = create<AppState>((set, get) => ({
   inspectorOpen: false,
 
   setView: (view) => set({ view }),
+  setTheme: (theme) => {
+    applyTheme(theme);
+    persistTheme(theme);
+    set({ theme });
+  },
+  toggleTheme: () => {
+    const theme: Theme = get().theme === "dark" ? "light" : "dark";
+    applyTheme(theme);
+    persistTheme(theme);
+    set({ theme });
+  },
   beginScan: (root) =>
     set({
       status: "scanning",

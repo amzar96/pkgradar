@@ -1,18 +1,20 @@
 import { Check, Copy } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { HEALTH_COLOR, HEALTH_LABEL, deltaLabel, type Health } from "../lib/health";
+import { HEALTH_COLOR, HEALTH_LABEL, alpha, deltaLabel, type Health } from "../lib/health";
 import type { PackageNode } from "../types";
 
 export function HealthDot({ health, size = 8 }: { health: Health; size?: number }) {
   return (
     <span
+      role="img"
+      aria-label={HEALTH_LABEL[health]}
       title={HEALTH_LABEL[health]}
       style={{
         width: size,
         height: size,
         background: HEALTH_COLOR[health],
-        boxShadow: `0 0 10px ${HEALTH_COLOR[health]}55`,
+        boxShadow: `0 0 10px ${alpha(HEALTH_COLOR[health], 33)}`,
       }}
       className="inline-block shrink-0 rounded-full"
     />
@@ -35,7 +37,11 @@ export function DeltaBadge({ node, compact = false }: { node: PackageNode; compa
   return (
     <span
       className="rounded border px-1.5 py-px font-mono text-[10px] leading-4 tracking-tight whitespace-nowrap"
-      style={{ color, borderColor: `${color}44`, background: `${color}12` }}
+      style={{
+        color,
+        borderColor: alpha(color, 27),
+        background: alpha(color, 7),
+      }}
     >
       {compact ? deltaLabel(node) : `${node.delta === "unknown" ? "?" : deltaLabel(node)}`}
       {node.breaking && !compact ? "!" : ""}
@@ -45,7 +51,7 @@ export function DeltaBadge({ node, compact = false }: { node: PackageNode; compa
 
 export function Pill({
   children,
-  color = "#8b98a9",
+  color = "var(--color-muted)",
   className = "",
   title,
 }: {
@@ -58,7 +64,7 @@ export function Pill({
     <span
       title={title}
       className={`rounded border px-1.5 py-px font-mono text-[10px] leading-4 whitespace-nowrap ${className}`}
-      style={{ color, borderColor: `${color}3d`, background: `${color}10` }}
+      style={{ color, borderColor: alpha(color, 24), background: alpha(color, 6) }}
     >
       {children}
     </span>
@@ -69,7 +75,7 @@ export function CopyButton({ value, label = "copy" }: { value: string; label?: s
   const [copied, setCopied] = useState(false);
   return (
     <button
-      className="inline-flex items-center gap-1 rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-muted transition hover:border-line2 hover:text-fg"
+      className="inline-flex items-center gap-1 rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-muted transition-colors hover:border-line2 hover:text-fg"
       onClick={(event) => {
         event.stopPropagation();
         navigator.clipboard.writeText(value).then(() => {
@@ -89,7 +95,7 @@ export function StatTile({
   label,
   value,
   hint,
-  color = "#e7edf4",
+  color = "var(--color-fg)",
   icon,
 }: {
   label: string;

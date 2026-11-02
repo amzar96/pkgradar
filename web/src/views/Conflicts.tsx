@@ -8,13 +8,13 @@ import {
 import { useMemo, useState } from "react";
 
 import { EmptyState, Pill } from "../components/primitives";
+import { alpha } from "../lib/health";
 import { useApp } from "../store";
-import type { Conflict } from "../types";
 
 const SEVERITY_COLOR: Record<string, string> = {
-  high: "#f87171",
-  medium: "#fbbf24",
-  low: "#7dd3fc",
+  high: "var(--color-major)",
+  medium: "var(--color-minor)",
+  low: "var(--color-accent)",
 };
 
 const KIND_LABEL: Record<string, string> = {
@@ -64,6 +64,7 @@ export default function Conflicts() {
           </div>
           <div className="flex items-center gap-2">
             <select
+              aria-label="Filter conflicts by project"
               value={filter ?? ""}
               onChange={(event) => setFilter(event.target.value || null)}
               className="rounded border border-line bg-panel px-2 py-1.5 font-mono text-[10px] text-muted outline-none"
@@ -109,14 +110,14 @@ export default function Conflicts() {
                           className="rounded px-1.5 py-px font-mono text-[9px] tracking-wide uppercase"
                           style={{
                             color: SEVERITY_COLOR[conflict.severity],
-                            border: `1px solid ${SEVERITY_COLOR[conflict.severity]}44`,
-                            background: `${SEVERITY_COLOR[conflict.severity]}12`,
+                            border: `1px solid ${alpha(SEVERITY_COLOR[conflict.severity], 27)}`,
+                            background: alpha(SEVERITY_COLOR[conflict.severity], 7),
                           }}
                         >
                           {conflict.severity}
                         </span>
-                        <Pill color="#8b98a9">{KIND_LABEL[conflict.kind] ?? conflict.kind}</Pill>
-                        <Pill color="#7dd3fc">{conflict.project_id}</Pill>
+                        <Pill>{KIND_LABEL[conflict.kind] ?? conflict.kind}</Pill>
+                        <Pill color="var(--color-accent)">{conflict.project_id}</Pill>
                         <span className="text-[12px] font-medium text-fg">{conflict.title}</span>
                         {target ? (
                           <button
@@ -125,7 +126,7 @@ export default function Conflicts() {
                               selectNode(target.id);
                               setView("topology");
                             }}
-                            className="ml-auto flex items-center gap-1 rounded border border-line px-2 py-1 text-[10px] text-dim transition hover:border-accent/40 hover:text-accent"
+                            className="ml-auto flex items-center gap-1 rounded border border-line px-2 py-1 text-[10px] text-dim transition-colors hover:border-accent/40 hover:text-accent"
                           >
                             <GitBranch size={10} />
                             open in graph
@@ -210,13 +211,13 @@ export default function Conflicts() {
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-[11px] text-fg">{project.id}</span>
-                    <Pill color="#7dd3fc">
+                    <Pill color="var(--color-accent)">
                       {project.drift.venv_only.length} installed only
                     </Pill>
-                    <Pill color="#fbbf24">
+                    <Pill color="var(--color-minor)">
                       {project.drift.lock_only.length} locked only
                     </Pill>
-                    <Pill color="#f87171">
+                    <Pill color="var(--color-major)">
                       {project.drift.version_mismatch.length} version mismatch
                     </Pill>
                     <span className="ml-auto font-mono text-[9px] text-dim">

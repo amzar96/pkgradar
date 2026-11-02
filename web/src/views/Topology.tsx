@@ -9,17 +9,20 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import ELK from "elkjs/lib/elk.bundled.js";
+import ELK from "elkjs/lib/elk-api.js";
+import ElkWorker from "elkjs/lib/elk-worker.min.js?worker";
 import { Maximize2, Network, SlidersHorizontal } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import GraphNode, { type GraphNodeData } from "../components/GraphNode";
 import { EmptyState } from "../components/primitives";
 import { HEALTH_COLOR } from "../lib/health";
+import { prefersReducedMotion } from "../lib/theme";
 import { useActiveProject, useApp } from "../store";
 import type { PackageEdge, PackageNode, Project } from "../types";
 
-const elk = new ELK();
+const elk = new ELK({ workerFactory: () => new ElkWorker() });
+const MAX_ELK_NODES = 300;
 const NODE_W = 172;
 const NODE_H = 58;
 
@@ -176,6 +179,7 @@ function ancestors(project: Project, nodeId: string | null): Set<string> {
 
 function TopologyInner() {
   const project = useActiveProject();
+  const theme = useApp((state) => state.theme);
   const selectedNode = useApp((state) => state.selectedNode);
   const selectNode = useApp((state) => state.selectNode);
   const search = useApp((state) => state.search);
@@ -193,6 +197,10 @@ function TopologyInner() {
   const { fitView } = useReactFlow();
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [layouting, setLayouting] = useState(false);
+  const [layoutNote, setLayoutNote] = useState<string | null>(null);
+  const nodeDataCache = useRef(new Map<string, GraphNodeData>());
+  const deferredSearch = useDeferredValue(search);
+  const reducedMotion = prefersReducedMotion();
 
   const nodesById = useMemo(
     () => new Map((project?.nodes ?? []).map((node) => [node.id, node])),
@@ -224,6 +232,15 @@ function TopologyInner() {
     );
   }, [project, visibleIds]);
 
+  const fit = (padding: number, minZoom: number, maxZoom: number) => {
+    fitView({
+      padding,
+      duration: reducedMotion || visibleIds.size > 150 ? 0 : 320,
+      minZoom,
+      maxZoom,
+    });
+  };
+
   const signature = useMemo(
     () => `${[...visibleIds].sort().join("|")}::${layoutKind}`,
     [visibleIds, layoutKind],
@@ -236,16 +253,14 @@ function TopologyInner() {
 
   useEffect(() => {
     if (!project || visibleIds.size === 0) return;
+    setLayoutNote(null);
     if (effectiveLayout === "radial") {
       const visible = [...visibleIds]
         .map((id) => nodesById.get(id))
         .filter((node): node is PackageNode => Boolean(node));
       setPositions(radialPositions(visible, visibleEdges));
       setLayouting(false);
-      const timer = window.setTimeout(
-        () => fitView({ padding: 0.1, duration: 350, minZoom: 0.34, maxZoom: 1.05 }),
-        40,
-      );
+      const timer = window.setTimeout(() => fit(0.1, 0.34, 1.05), 40);
       return () => window.clearTimeout(timer);
     }
     if (effectiveLayout === "compact") {
@@ -254,10 +269,19 @@ function TopologyInner() {
         .filter((node): node is PackageNode => Boolean(node));
       setPositions(compactPositions(visible));
       setLayouting(false);
-      const timer = window.setTimeout(
-        () => fitView({ padding: 0.08, duration: 350, minZoom: 0.18, maxZoom: 0.95 }),
-        40,
-      );
+      const timer = window.setTimeout(() => fit(0.08, 0.18, 0.95), 40);
+      return () => window.clearTimeout(timer);
+    }
+    // ELK is layout-heavy. Above the cap, use the cheap grid so filters and
+    // selection stay responsive instead of freezing the browser.
+    if (visibleIds.size > MAX_ELK_NODES) {
+      const visible = [...visibleIds]
+        .map((id) => nodesById.get(id))
+        .filter((node): node is PackageNode => Boolean(node));
+      setPositions(compactPositions(visible));
+      setLayouting(false);
+      setLayoutNote(`compact layout for ${visible.length} nodes`);
+      const timer = window.setTimeout(() => fit(0.08, 0.16, 0.9), 40);
       return () => window.clearTimeout(timer);
     }
     let cancelled = false;
@@ -287,13 +311,16 @@ function TopologyInner() {
         }
         setPositions(map);
         setLayouting(false);
-        window.setTimeout(
-          () => fitView({ padding: 0.12, duration: 350, minZoom: 0.34, maxZoom: 0.95 }),
-          40,
-        );
+        window.setTimeout(() => fit(0.12, 0.34, 0.95), 40);
       })
       .catch(() => {
-        if (!cancelled) setLayouting(false);
+        if (cancelled) return;
+        const visible = [...visibleIds]
+          .map((id) => nodesById.get(id))
+          .filter((node): node is PackageNode => Boolean(node));
+        setPositions(compactPositions(visible));
+        setLayoutNote("worker unavailable — compact layout");
+        setLayouting(false);
       });
     return () => {
       cancelled = true;
@@ -305,7 +332,7 @@ function TopologyInner() {
     [project, selectedNode],
   );
 
-  const searchTerm = search.trim().toLowerCase();
+  const searchTerm = deferredSearch.trim().toLowerCase();
   const searching = searchTerm.length >= 2;
 
   const hiddenByDepth = useMemo(() => {
@@ -319,12 +346,19 @@ function TopologyInner() {
     for (const id of visibleIds) {
       const pkg = nodesById.get(id);
       if (!pkg) continue;
+      const highlighted = path.has(id);
       const dimmed = searching && !pkg.name.toLowerCase().includes(searchTerm);
+      const cached = nodeDataCache.current.get(id);
+      const data: GraphNodeData =
+        cached && cached.pkg === pkg && cached.highlighted === highlighted && cached.dimmed === dimmed
+          ? cached
+          : { pkg, highlighted, dimmed };
+      nodeDataCache.current.set(id, data);
       result.push({
         id,
         type: "pkg",
         position: positions[id] ?? { x: 0, y: 0 },
-        data: { pkg, highlighted: path.has(id), dimmed } satisfies GraphNodeData,
+        data,
         draggable: false,
         selectable: true,
       });
@@ -344,7 +378,13 @@ function TopologyInner() {
         target: edge.target,
         type: effectiveLayout === "radial" ? "straight" : "smoothstep",
         style: {
-          stroke: onPath ? "#7dd3fc" : dev ? "#3a3354" : inferred ? "#3a2a2a" : "#25313f",
+          stroke: onPath
+            ? "var(--color-accent)"
+            : dev
+              ? "var(--edge-dev)"
+              : inferred
+                ? "var(--edge-inferred)"
+                : "var(--edge)",
           strokeWidth: onPath ? 1.8 : 1,
           strokeDasharray: dev || inferred ? "3 3" : undefined,
           opacity: searching ? 0.25 : 1,
@@ -384,7 +424,7 @@ function TopologyInner() {
               <button
                 key={kind}
                 onClick={() => setLayout(kind)}
-                className={`px-2 py-1 text-[10px] transition ${
+                className={`px-2 py-1 text-[10px] transition-colors ${
                   layoutKind === kind
                     ? "bg-accent/15 text-accent"
                     : "text-dim hover:bg-panel2 hover:text-muted"
@@ -398,6 +438,7 @@ function TopologyInner() {
           <label className="flex items-center gap-1.5 text-[10px] text-dim">
             depth
             <select
+              aria-label="Dependency depth"
               value={depthLimit}
               onChange={(event) => setDepthLimit(Number(event.target.value))}
               className="rounded border border-line bg-panel2 px-1 py-1 font-mono text-[10px] text-muted outline-none"
@@ -414,6 +455,7 @@ function TopologyInner() {
           <label className="flex items-center gap-1.5 text-[10px] text-dim">
             group
             <select
+              aria-label="Dependency group"
               value={group ?? ""}
               onChange={(event) => setGroup(event.target.value || null)}
               className="rounded border border-line bg-panel2 px-1 py-1 font-mono text-[10px] text-muted outline-none"
@@ -429,7 +471,7 @@ function TopologyInner() {
 
           <button
             onClick={toggleOutdated}
-            className={`rounded border px-2 py-1 text-[10px] transition ${
+            className={`rounded border px-2 py-1 text-[10px] transition-colors ${
               onlyOutdated
                 ? "border-minor/40 bg-minor/10 text-minor"
                 : "border-line text-dim hover:text-muted"
@@ -439,7 +481,7 @@ function TopologyInner() {
           </button>
           <button
             onClick={toggleAdvisories}
-            className={`rounded border px-2 py-1 text-[10px] transition ${
+            className={`rounded border px-2 py-1 text-[10px] transition-colors ${
               onlyAdvisories
                 ? "border-cve/40 bg-cve/10 text-cve"
                 : "border-line text-dim hover:text-muted"
@@ -449,9 +491,10 @@ function TopologyInner() {
           </button>
 
           <button
-            onClick={() => fitView({ padding: 0.12, duration: 300, minZoom: 0.3, maxZoom: 1 })}
-            className="rounded border border-line p-1 text-dim transition hover:text-fg"
+            onClick={() => fit(0.12, 0.3, 1)}
+            className="rounded border border-line p-1 text-dim transition-colors hover:text-fg"
             title="Fit view"
+            aria-label="Fit graph to view"
           >
             <Maximize2 size={11} />
           </button>
@@ -460,7 +503,7 @@ function TopologyInner() {
             <button
               onClick={() => setDepthLimit(99)}
               title="Expand every package at every depth"
-              className="ml-auto rounded border border-accent/30 bg-accent/10 px-2 py-1 font-mono text-[9.5px] text-accent transition hover:bg-accent/20"
+              className="ml-auto rounded border border-accent/30 bg-accent/10 px-2 py-1 font-mono text-[9.5px] text-accent transition-colors hover:bg-accent/20"
             >
               +{hiddenByDepth} hidden
             </button>
@@ -490,10 +533,17 @@ function TopologyInner() {
           fitView
           proOptions={{ hideAttribution: true }}
           nodesConnectable={false}
+          nodesDraggable={false}
+          onlyRenderVisibleElements
           elevateEdgesOnSelect
-          colorMode="dark"
+          colorMode={theme}
         >
-          <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#1a2330" />
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={22}
+            size={1}
+            color="var(--grid-dot)"
+          />
           <Controls showInteractive={false} position="bottom-right" />
         </ReactFlow>
 
@@ -517,6 +567,10 @@ function TopologyInner() {
       {layouting ? (
         <div className="absolute top-3 right-3 rounded border border-line bg-panel px-2 py-1 font-mono text-[9.5px] text-dim">
           laying out…
+        </div>
+      ) : layoutNote ? (
+        <div className="absolute top-3 right-3 rounded border border-line bg-panel px-2 py-1 font-mono text-[9.5px] text-dim">
+          {layoutNote}
         </div>
       ) : null}
       </div>

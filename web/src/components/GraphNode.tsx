@@ -1,7 +1,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { memo } from "react";
 
-import { HEALTH_COLOR, health } from "../lib/health";
+import { HEALTH_COLOR, alpha, health } from "../lib/health";
 import type { PackageNode } from "../types";
 import { DeltaBadge } from "./primitives";
 
@@ -20,23 +20,27 @@ function GraphNodeView({ data, selected }: NodeProps) {
   return (
     <div
       style={{
-        borderColor: selected || highlighted ? `${color}aa` : undefined,
+        borderColor: selected || highlighted ? alpha(color, 67) : undefined,
         boxShadow: selected
-          ? `0 0 0 1px ${color}66, 0 12px 32px rgba(0,0,0,.55)`
+          ? `0 0 0 1px ${alpha(color, 40)}, var(--shadow)`
           : highlighted
-            ? `0 0 0 1px ${color}44`
+            ? `0 0 0 1px ${alpha(color, 27)}`
             : undefined,
         opacity: dimmed ? 0.28 : 1,
+        background: pkg.root
+          ? "linear-gradient(180deg, var(--root-from), var(--root-to))"
+          : undefined,
       }}
-      className={`relative flex h-[58px] w-[172px] flex-col justify-center overflow-hidden rounded-lg border px-2.5 py-1.5 transition ${
-        pkg.root
-          ? "border-accent/40 bg-[linear-gradient(180deg,#12202b,#0c1015)]"
-          : "border-line bg-panel hover:border-line2"
+      className={`relative flex h-[58px] w-[172px] flex-col justify-center overflow-hidden rounded-lg border px-2.5 py-1.5 transition-[border-color,box-shadow,opacity,background-color] duration-150 ${
+        pkg.root ? "border-accent/40" : "border-line bg-panel hover:border-line2"
       }`}
     >
       <span
         className="absolute top-0 bottom-0 left-0 w-[2px]"
-        style={{ background: pkg.root ? "#7dd3fc" : color, opacity: pkg.root ? 0.9 : 0.75 }}
+        style={{
+          background: pkg.root ? "var(--color-accent)" : color,
+          opacity: pkg.root ? 0.9 : 0.75,
+        }}
       />
       <Handle type="target" position={Position.Top} />
       <div className="flex items-center gap-1.5">
@@ -46,7 +50,11 @@ function GraphNodeView({ data, selected }: NodeProps) {
         {advisories > 0 ? (
           <span
             className="rounded px-1 font-mono text-[9px] leading-4"
-            style={{ color: "#e879f9", background: "#e879f91a", border: "1px solid #e879f940" }}
+            style={{
+              color: "var(--color-cve)",
+              background: alpha("var(--color-cve)", 10),
+              border: `1px solid ${alpha("var(--color-cve)", 25)}`,
+            }}
             title={`${advisories} advisories`}
           >
             {advisories} CVE
@@ -76,14 +84,14 @@ function GraphNodeView({ data, selected }: NodeProps) {
               : `${pkg.dependents} dependent${pkg.dependents === 1 ? "" : "s"}`}
         </span>
         {pkg.group !== "main" && !pkg.root ? (
-          <span className="rounded bg-line px-1 text-[8.5px] text-dim">{pkg.group}</span>
+          <span className="rounded bg-line px-1 text-[9px] text-dim">{pkg.group}</span>
         ) : null}
         {pkg.drift === "missing" ? (
-          <span className="text-[8.5px] text-dim">not installed</span>
+          <span className="text-[9px] text-dim">not installed</span>
         ) : pkg.drift === "version" ? (
-          <span className="text-[8.5px] text-minor">drift</span>
+          <span className="text-[9px] text-minor">drift</span>
         ) : null}
-        {pkg.yanked ? <span className="text-[8.5px] text-major">yanked</span> : null}
+        {pkg.yanked ? <span className="text-[9px] text-major">yanked</span> : null}
       </div>
       <Handle type="source" position={Position.Bottom} />
     </div>

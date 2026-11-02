@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, PackageSearch, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 
 import { DeltaBadge, EmptyState, HealthDot, Pill } from "../components/primitives";
 import { HEALTH_COLOR, health, humanAge } from "../lib/health";
@@ -43,10 +43,11 @@ export default function Packages() {
   const [onlyOutdated, setOnlyOutdated] = useState(false);
   const [onlyDirect, setOnlyDirect] = useState(false);
   const [limit, setLimit] = useState(80);
+  const deferredTerm = useDeferredValue(term);
 
   const rows = useMemo(() => {
     if (!project) return [];
-    const needle = term.trim().toLowerCase();
+    const needle = deferredTerm.trim().toLowerCase();
     const filtered = project.nodes.filter((node) => {
       if (node.root) return false;
       if (needle && !node.name.includes(needle) && !(node.latest ?? "").includes(needle))
@@ -74,7 +75,7 @@ export default function Packages() {
           return (a.risk - b.risk) * direction;
       }
     });
-  }, [project, term, sort, asc, onlyOutdated, onlyDirect]);
+  }, [project, deferredTerm, sort, asc, onlyOutdated, onlyDirect]);
 
   if (!project) {
     return (
@@ -93,7 +94,7 @@ export default function Packages() {
           setAsc(key === "name");
         }
       }}
-      className={`flex items-center gap-1 text-left text-[9px] font-medium tracking-[0.14em] uppercase transition hover:text-fg ${
+      className={`flex items-center gap-1 text-left text-[9px] font-medium tracking-[0.14em] uppercase transition-colors hover:text-fg ${
         sort === key ? "text-fg" : "text-dim"
       } ${className}`}
     >
@@ -123,6 +124,7 @@ export default function Packages() {
           <div className="flex items-center gap-1.5 rounded-md border border-line bg-panel px-2 py-1.5">
             <Search size={12} className="text-dim" />
             <input
+              aria-label="Filter packages"
               value={term}
               onChange={(event) => setTerm(event.target.value)}
               placeholder="filter packages"
@@ -131,7 +133,7 @@ export default function Packages() {
           </div>
           <button
             onClick={() => setOnlyOutdated(!onlyOutdated)}
-            className={`rounded border px-2 py-1.5 text-[10px] transition ${
+            className={`rounded border px-2 py-1.5 text-[10px] transition-colors ${
               onlyOutdated
                 ? "border-minor/40 bg-minor/10 text-minor"
                 : "border-line text-dim hover:text-muted"
@@ -141,7 +143,7 @@ export default function Packages() {
           </button>
           <button
             onClick={() => setOnlyDirect(!onlyDirect)}
-            className={`rounded border px-2 py-1.5 text-[10px] transition ${
+            className={`rounded border px-2 py-1.5 text-[10px] transition-colors ${
               onlyDirect
                 ? "border-accent/40 bg-accent/10 text-accent"
                 : "border-line text-dim hover:text-muted"
@@ -154,7 +156,7 @@ export default function Packages() {
 
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-left">
-          <thead className="sticky top-0 z-10 bg-[#0a0d12]/95 backdrop-blur">
+          <thead className="sticky top-0 z-10 bg-table-head">
             <tr className="border-b border-line">
               <th className="py-2 pr-3 pl-5">{header("name", "package")}</th>
               <th className="px-3 py-2">{header("version", "locked")}</th>
@@ -213,7 +215,7 @@ function Row({
   return (
     <tr
       onClick={onClick}
-      className={`group cursor-pointer border-b border-line/50 transition hover:bg-panel2/60 ${
+      className={`group cursor-pointer border-b border-line/50 transition-colors hover:bg-panel2/60 ${
         active ? "bg-panel2" : ""
       }`}
     >
@@ -221,8 +223,13 @@ function Row({
         <div className="flex items-center gap-2">
           <HealthDot health={state} size={6} />
           <span className="max-w-[220px] truncate font-mono text-[11px] text-fg">{node.name}</span>
-          {node.direct ? <Pill color="#7dd3fc">direct</Pill> : null}
-          {node.yanked ? <Pill color="#f87171">yanked</Pill> : null}
+          {node.direct ? <Pill color="var(--color-accent)">direct</Pill> : null}
+          {node.yanked ? <Pill color="var(--color-major)">yanked</Pill> : null}
+          {node.index && node.index !== "PyPI" ? (
+            <Pill color="var(--color-accent)" className="max-w-[120px] truncate">
+              {node.index}
+            </Pill>
+          ) : null}
         </div>
       </td>
       <td className="px-3 py-1.5 font-mono text-[10.5px] text-muted">{node.version || "?"}</td>
@@ -233,7 +240,7 @@ function Row({
           <span className="text-dim">—</span>
         )}
         {node.latest_upload ? (
-          <span className="ml-1.5 text-[8.5px] text-dim">{humanAge(node.latest_upload)}</span>
+          <span className="ml-1.5 text-[9.5px] text-dim">{humanAge(node.latest_upload)}</span>
         ) : null}
       </td>
       <td className="px-3 py-1.5">

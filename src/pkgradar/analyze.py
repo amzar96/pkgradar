@@ -376,6 +376,8 @@ def apply_enrichment(
         info = infos.get(node.name)
         if info is not None:
             node.available = info.available
+            if info.index:
+                node.index = info.index
             if info.available:
                 node.latest = info.latest
                 node.latest_upload = info.latest_upload
