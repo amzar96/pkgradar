@@ -5,7 +5,11 @@ and it maps every `uv.lock` + `.venv` underneath: the full dependency graph, wha
 pinned by, what has drifted from the lock, which packages are outdated or vulnerable, and which
 versions disagree across projects.
 
-One scanner, two front ends: a dark, radar-style **web UI** and a **terminal UI**.
+One scanner, three ways in: a dark, radar-style **web UI**, a **terminal UI**, and a
+one-shot **CLI report / JSON export**.
+
+> Working on pkgradar? [AGENTS.md](AGENTS.md) documents the architecture, data flow,
+> invariants, and change checklist for coding agents.
 
 ![Fleet overview](docs/fleet.png)
 
@@ -45,6 +49,15 @@ Terminal UI — package tree with an inspector, plus conflicts and skew tabs:
 ![TUI topology](docs/tui-topology.jpg)
 ![TUI skew](docs/tui-skew.jpg)
 
+## Requirements
+
+- **Python 3.11+**
+- **[uv](https://docs.astral.sh/uv/)** — required for the optional deep checks
+  (`uv lock --check`, `uv sync --dry-run`) and expected for the projects it scans
+- **Node.js 20+ and npm** — only needed to build or develop the web UI
+
+pkgradar is read-only: it never installs, syncs, or edits the projects it scans.
+
 ## Quick start
 
 ```bash
@@ -75,8 +88,8 @@ These apply to `scan` and `tui`; `serve` takes `root`, `--host`, `--port`, `--op
 
 | Flag | Effect |
 | --- | --- |
-| `--offline` | Use cached PyPI data only, no network |
-| `--no-enrich` | Skip PyPI lookups entirely (no latest/delta) |
+| `--offline` | Use cached PyPI data only, no network; OSV is skipped |
+| `--no-enrich` | Skip all enrichment (PyPI and OSV) |
 | `--no-advisories` | Skip OSV lookups |
 | `--fast` | Skip `uv lock --check` and `uv sync --dry-run` |
 
@@ -109,6 +122,26 @@ The graph reads from the **lockfile** (resolution truth) and reconciles against 
 - **Conflicts / Skew** — the same data as the web tables.
 
 Scanning happens in a background worker, so the UI stays responsive; `r` re-runs it.
+
+## HTTP API
+
+The web UI is a thin client over the scanner; the same data is available directly.
+
+| Method / path | Purpose |
+| --- | --- |
+| `GET /api/health` | `{ok, version, root}` |
+| `GET /api/defaults` | `{root, cwd, version, has_web}` used by the SPA bootstrap |
+| `GET /api/scan` | SSE stream; query params `root`, `offline`, `enrich`, `advisories`, `deep` |
+| `GET /api/scan/result` | Same scan as a single JSON `ScanResult` |
+| `GET /api/docs` | FastAPI/OpenAPI docs |
+
+The SSE stream emits `progress`, `project` (one project as soon as it is parsed),
+`enrich`, `done` (the full `ScanResult`), and `error` events. A typical non-streaming
+call:
+
+```bash
+curl 'http://127.0.0.1:6767/api/scan/result?root=/path/to/code&offline=true'
+```
 
 ## Read-only by design
 
@@ -157,30 +190,67 @@ src/pkgradar/
   api.py        FastAPI + SSE + static web bundle + loopback guards
   cli.py        scan / serve / tui
   tui.py        Textual app
-web/            React 19 + Vite + Tailwind v4 + @xyflow/react + elkjs + zustand
+  models.py     Pydantic models; canonical JSON shape for the API + web types
+  proc.py       subprocess helper; strips VIRTUAL_ENV/CONDA_PREFIX/PYTHONHOME
+  utils.py      name/version/requirement parsing, semver delta, safe filenames
+web/src/        React 19 + Vite + Tailwind v4 + @xyflow/react + elkjs + zustand
 ```
+
+The scan is a pipeline: **discover → parse lock / declared graph → read venv dist-info and reconcile
+drift → enrich from PyPI and OSV → compute conflicts, risk, skew, and stats**. The lockfile is
+treated as resolution truth and `dist-info` as environment truth; a stale venv is reported as drift,
+not as an unsatisfiable solver result.
 
 Conflict detection computes the **allowed interval per parent specifier** (marker-aware, using
 installed metadata when lock edges are ambiguous) and flags packages whose resolved version falls
 outside a parent's constraint. Lock/venv drift is reconciled separately from solver errors, so a
-stale venv doesn't masquerade as an unsatisfiable dependency set.
+stale venv doesn't masquerade as an unsatisfiable dependency set. Deep scans additionally run
+`uv lock --check` and, when the venv interpreter is trustworthy, `uv sync --dry-run` to report the
+exact install/uninstall plan.
+
+The Pydantic models in `src/pkgradar/models.py` are the wire contract; `web/src/types.ts` mirrors
+them. See [AGENTS.md](AGENTS.md) for the module-by-module data flow and change recipes.
 
 ## Development
 
 ```bash
+# Python environment
 uv sync
-cd web && npm install && npm run build   # writes src/pkgradar/webdist
+
+# Fast smoke scan: no PyPI, no OSV, no uv subprocess checks
+uv run pkgradar scan . --fast --no-enrich --no-advisories --quiet
+
+# Web build (writes the committed bundle in src/pkgradar/webdist)
+cd web && npm install && npm run build
 cd .. && uv run pkgradar serve --open
 ```
 
+For live frontend work, run the API and Vite side by side. Vite proxies `/api` to
+`127.0.0.1:6767`, so the React app talks to a real scanner:
+
+```bash
+# terminal 1
+uv run pkgradar serve . --port 6767
+
+# terminal 2
+cd web && npm run dev        # http://127.0.0.1:5173
+```
+
 `npm run build` runs `tsc --noEmit` and Vite. The compiled bundle is committed under
-`src/pkgradar/webdist` so `uv tool install .` ships a working UI.
+`src/pkgradar/webdist` so `uv tool install .` ships a working UI — rebuild it after
+any `web/src` change. Do not edit the hashed files in `webdist` directly.
+
+There is currently **no automated test suite or linter** configured; validate changes
+with the smoke scan, `npm run build`, and a manual pass through the web UI / TUI.
+[AGENTS.md](AGENTS.md) has the full validation checklist and the invariants to
+preserve (read-only scanning, no interpreter execution, loopback trust model).
 
 ## Limitations
 
 - Python/uv only. `pip`-only or Poetry projects are not discovered.
-- Markers are evaluated against the running interpreter; optional/extra dependencies are shown but
-  conflicts across mutually exclusive marker branches are intentionally not reported.
+- Markers are evaluated using the running interpreter environment, overridden with the venv's
+  Python version when available; optional/extra dependencies are shown but conflicts across
+  mutually exclusive marker branches are intentionally not reported.
 - PyPI/OSV enrichment is best-effort (cache + rate limits); use `--offline` for deterministic scans.
 - `uv sync --dry-run` output is advisory — pkgradar reports what uv *would* do, it never runs it.
   Plans are skipped when the project interpreter is not a trusted symlink (e.g. Windows venvs).
