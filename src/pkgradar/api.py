@@ -11,14 +11,27 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import __version__
+from .indexes import IndexConfig, index_refs, resolve_indexes
 from .scanner import scan
 
 WEB_DIST = Path(__file__).parent / "webdist"
 LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "::1"]
 
 
-def create_app(default_root: Path | None = None, *, allow_remote: bool = False) -> FastAPI:
+def create_app(
+    default_root: Path | None = None,
+    *,
+    allow_remote: bool = False,
+    indexes: list[IndexConfig] | None = None,
+    trust_project_indexes: bool = False,
+    index_api: str = "auto",
+    index_ca_bundle: str | None = None,
+    index_timeout: float = 25.0,
+    index_concurrency: int = 12,
+    osv_include_private: bool = False,
+) -> FastAPI:
     root_default = (default_root or Path.cwd()).expanduser().resolve()
+    index_configs = indexes or resolve_indexes(api=index_api, ca_bundle=index_ca_bundle)
     app = FastAPI(title="pkgradar", version=__version__, docs_url="/api/docs")
 
     # Host validation blocks DNS-rebinding: a page on attacker.example cannot
@@ -49,6 +62,8 @@ def create_app(default_root: Path | None = None, *, allow_remote: bool = False) 
             "cwd": str(Path.cwd()),
             "version": __version__,
             "has_web": (WEB_DIST / "index.html").exists(),
+            "indexes": [ref.model_dump(mode="json") for ref in index_refs(index_configs)],
+            "trust_project_indexes": trust_project_indexes,
         }
 
     def _root(value: str | None) -> Path:
@@ -82,6 +97,13 @@ def create_app(default_root: Path | None = None, *, allow_remote: bool = False) 
                         enrich=enrich,
                         advisories=advisories,
                         deep=deep,
+                        indexes=index_configs,
+                        trust_project_indexes=trust_project_indexes,
+                        index_api=index_api,
+                        index_ca_bundle=index_ca_bundle,
+                        index_timeout=index_timeout,
+                        index_concurrency=index_concurrency,
+                        osv_include_private=osv_include_private,
                         on_event=on_event,
                     )
                     await queue.put(("__result__", result.model_dump(mode="json")))
@@ -125,6 +147,13 @@ def create_app(default_root: Path | None = None, *, allow_remote: bool = False) 
             enrich=enrich,
             advisories=advisories,
             deep=deep,
+            indexes=index_configs,
+            trust_project_indexes=trust_project_indexes,
+            index_api=index_api,
+            index_ca_bundle=index_ca_bundle,
+            index_timeout=index_timeout,
+            index_concurrency=index_concurrency,
+            osv_include_private=osv_include_private,
         )
         return JSONResponse(result.model_dump(mode="json"))
 

@@ -12,6 +12,7 @@ import { useMemo } from "react";
 import {
   HEALTH_COLOR,
   HEALTH_LABEL,
+  alpha,
   formatDate,
   health,
   humanAge,
@@ -93,7 +94,7 @@ export default function Inspector() {
       : null;
 
   return (
-    <aside className="slide-in flex w-[382px] shrink-0 flex-col border-l border-line bg-[#0a0d12]">
+    <aside className="slide-in flex w-[382px] shrink-0 flex-col border-l border-line bg-inspector">
       <div className="flex items-start justify-between border-b border-line px-4 py-3.5">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -116,7 +117,8 @@ export default function Inspector() {
         </div>
         <button
           onClick={closeInspector}
-          className="rounded p-1 text-dim transition hover:bg-panel2 hover:text-fg"
+          aria-label="Close inspector"
+          className="rounded p-1 text-dim transition-colors hover:bg-panel2 hover:text-fg"
         >
           <X size={14} />
         </button>
@@ -131,11 +133,12 @@ export default function Inspector() {
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-dim">
               {node.releases_behind !== null ? (
-                <Pill color="#8b98a9">{node.releases_behind} releases newer</Pill>
+                <Pill>{node.releases_behind} releases newer</Pill>
               ) : null}
               {node.latest_upload ? <Pill>{humanAge(node.latest_upload)}</Pill> : null}
-              {node.breaking ? <Pill color="#f87171">breaking change</Pill> : null}
-              {node.yanked ? <Pill color="#f87171">yanked</Pill> : null}
+              {node.breaking ? <Pill color="var(--color-major)">breaking change</Pill> : null}
+              {node.yanked ? <Pill color="var(--color-major)">yanked</Pill> : null}
+              {node.index ? <Pill color="var(--color-accent)">{node.index}</Pill> : null}
             </div>
           </Section>
         ) : null}
@@ -178,15 +181,15 @@ export default function Inspector() {
                   }}
                   target="_blank"
                   rel="noreferrer"
-                  className="block rounded-md border border-line bg-panel px-2.5 py-2 transition hover:border-line2"
+                  className="block rounded-md border border-line bg-panel px-2.5 py-2 transition-colors hover:border-line2"
                 >
                   <div className="flex items-center gap-1.5">
                     <span
-                      className="rounded px-1 font-mono text-[8.5px] tracking-wide"
+                      className="rounded px-1 font-mono text-[9.5px] tracking-wide"
                       style={{
                         color: severityColor(advisory.severity),
-                        border: `1px solid ${severityColor(advisory.severity)}44`,
-                        background: `${severityColor(advisory.severity)}12`,
+                        border: `1px solid ${alpha(severityColor(advisory.severity), 27)}`,
+                        background: alpha(severityColor(advisory.severity), 7),
                       }}
                     >
                       {(advisory.severity || "UNKNOWN").toUpperCase()}
@@ -254,7 +257,15 @@ export default function Inspector() {
                     <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted">
                       {parent?.name ?? edge.source}
                     </span>
-                    <Pill color={edge.kind === "dev" ? "#a78bfa" : edge.kind === "optional" ? "#fbbf24" : "#8b98a9"}>
+                    <Pill
+                      color={
+                        edge.kind === "dev"
+                          ? "var(--color-dev)"
+                          : edge.kind === "optional"
+                            ? "var(--color-minor)"
+                            : "var(--color-muted)"
+                      }
+                    >
                       {edge.kind}
                     </Pill>
                     <span className="font-mono text-[9.5px] text-dim">{edge.spec || "resolved"}</span>
@@ -284,19 +295,22 @@ export default function Inspector() {
             value={node.drift ? node.drift : "unknown"}
             colour={
               node.drift === "version"
-                ? "#fbbf24"
+                ? "var(--color-minor)"
                 : node.drift === "missing"
-                  ? "#f87171"
-                  : "#8b98a9"
+                  ? "var(--color-major)"
+                  : "var(--color-muted)"
             }
           />
           <Row label="Group" value={node.group} />
           <Row label="Depth" value={String(node.depth)} />
           <Row label="Dependents" value={String(node.dependents)} />
           <Row label="Source" value={node.source} />
+          <Row label="Index" value={node.index || "not enriched"} />
           <Row label="License" value={node.license || "—"} />
           <Row label="Latest release" value={formatDate(node.latest_upload)} />
-          {node.deprecated ? <Row label="Upstream" value="inactive" colour="#fbbf24" /> : null}
+          {node.deprecated ? (
+            <Row label="Upstream" value="inactive" colour="var(--color-minor)" />
+          ) : null}
         </Section>
 
         {node.summary ? (
@@ -358,7 +372,7 @@ function Row({
       <span className="text-[10px] text-dim">{label}</span>
       <span
         className={`truncate text-[10.5px] ${mono ? "font-mono" : ""}`}
-        style={{ color: colour ?? "#b6c2d1" }}
+        style={{ color: colour ?? "var(--color-muted)" }}
         title={value}
       >
         {value}

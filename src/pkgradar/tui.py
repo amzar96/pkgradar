@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -33,26 +34,26 @@ DELTA = {
 
 
 def _node_label(node: PackageNode) -> str:
-    bits = [f"[bold]{escape(node.name)}[/bold]", f"[dim]{escape(node.version)}[/dim]"]
+    bits = [f"[bold]{escape(node.name)}[/bold]", f"[dim]{escape(node.version)}[/]"]
     if node.root:
-        bits.append("[cyan]project[/cyan]")
+        bits.append("[cyan]project[/]")
     elif node.delta in ("major", "minor", "patch", "other"):
         bits.append(f"[{DELTA[node.delta]}]{node.delta}[/]")
     if node.advisories:
-        bits.append(f"[red]{len(node.advisories)} cve[/red]")
+        bits.append(f"[red]{len(node.advisories)} cve[/]")
     if node.drift and node.drift not in ("same", None):
-        bits.append(f"[magenta]{node.drift}[/magenta]")
+        bits.append(f"[magenta]{node.drift}[/]")
     if node.direct and not node.root:
-        bits.append("[dim]direct[/dim]")
+        bits.append("[dim]direct[/]")
     if node.group not in ("main", None):
-        bits.append(f"[dim]{escape(node.group)}[/dim]")
+        bits.append(f"[dim]{escape(node.group)}[/]")
     return "  ".join(bits)
 
 
 def _bar(value: float, width: int = 12) -> str:
     filled = max(0, min(width, round(value * width)))
     colour = "red" if value >= 0.75 else "yellow" if value >= 0.45 else "green"
-    return f"[{colour}]{'━' * filled}[/{colour}][dim]{'━' * (width - filled)}[/dim]"
+    return f"[{colour}]{'━' * filled}[/][dim]{'━' * (width - filled)}[/]"
 
 
 class PkgRadarApp(App):
@@ -62,22 +63,22 @@ class PkgRadarApp(App):
     SUB_TITLE = "dependency radar"
 
     CSS = """
-    Screen { background: #07080b; color: #d6dde6; }
-    Header { background: #0b0f14; color: #d6dde6; }
-    Footer { background: #0b0f14; color: #6b7785; }
-    TabbedContent { background: #07080b; }
-    ContentSwitcher { background: #07080b; }
-    DataTable { height: 1fr; background: #07080b; }
-    DataTable > .datatable--header { background: #0b0f14; color: #8b98a5; }
-    DataTable > .datatable--cursor { background: #16202b; color: #e6edf3; }
-    Tree { width: 58%; height: 1fr; background: #07080b; padding: 0 1; }
-    Tree > .tree--cursor { background: #16202b; color: #e6edf3; }
-    #inspector-scroll { width: 42%; height: 1fr; border-left: solid #1c2633;
-                        background: #090c10; }
+    Screen { background: $surface; color: $text; }
+    Header { background: $panel; color: $text; }
+    Footer { background: $panel; color: $text-muted; }
+    TabbedContent { background: $surface; }
+    ContentSwitcher { background: $surface; }
+    DataTable { height: 1fr; background: $surface; }
+    DataTable > .datatable--header { background: $panel; color: $text-muted; }
+    DataTable > .datatable--cursor { background: $primary 25%; color: $text; }
+    Tree { width: 58%; height: 1fr; background: $surface; padding: 0 1; }
+    Tree > .tree--cursor { background: $primary 25%; color: $text; }
+    #inspector-scroll { width: 42%; height: 1fr; border-left: solid $border;
+                        background: $panel; }
     #inspector { padding: 1 2; }
-    #status { height: 1; background: #0b0f14; color: #6b7785; padding: 0 1; }
-    .summary { height: auto; padding: 1 2; color: #8b98a5; }
-    .empty { padding: 2; color: #6b7785; }
+    #status { height: 1; background: $panel; color: $text-muted; padding: 0 1; }
+    .summary { height: auto; padding: 1 2; color: $text-muted; }
+    .empty { padding: 2; color: $text-muted; }
     """
 
     BINDINGS = [
@@ -86,6 +87,7 @@ class PkgRadarApp(App):
         Binding("3", "show_tab('conflicts')", "Conflicts", priority=True),
         Binding("4", "show_tab('skew')", "Skew", priority=True),
         Binding("r", "rescan", "Rescan"),
+        Binding("t", "toggle_theme", "Theme"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -97,6 +99,14 @@ class PkgRadarApp(App):
         enrich: bool = True,
         advisories: bool = True,
         deep: bool = True,
+        theme: str | None = None,
+        indexes: list | None = None,
+        trust_project_indexes: bool = False,
+        index_api: str = "auto",
+        index_ca_bundle: str | None = None,
+        index_timeout: float = 25.0,
+        index_concurrency: int = 12,
+        osv_include_private: bool = False,
     ) -> None:
         super().__init__()
         self.root = root
@@ -104,6 +114,14 @@ class PkgRadarApp(App):
         self.enrich = enrich
         self.advisories = advisories
         self.deep = deep
+        self.indexes = indexes
+        self.trust_project_indexes = trust_project_indexes
+        self.index_api = index_api
+        self.index_ca_bundle = index_ca_bundle
+        self.index_timeout = index_timeout
+        self.index_concurrency = index_concurrency
+        self.osv_include_private = osv_include_private
+        self._initial_theme = theme or os.environ.get("PKGRADAR_THEME")
         self.result: ScanResult | None = None
         self._incoming: dict[str, dict[str, list[Any]]] = {}
         self._tree_budget = 0
@@ -131,6 +149,8 @@ class PkgRadarApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        if self._initial_theme in {"light", "dark"}:
+            self.theme = f"textual-{self._initial_theme}"
         self.query_one("#fleet-table", DataTable).add_columns(
             "project", "pkgs", "outdated", "major", "adv", "drift", "venv", "lock"
         )
@@ -164,6 +184,13 @@ class PkgRadarApp(App):
                 enrich=self.enrich,
                 advisories=self.advisories,
                 deep=self.deep,
+                indexes=self.indexes,
+                trust_project_indexes=self.trust_project_indexes,
+                index_api=self.index_api,
+                index_ca_bundle=self.index_ca_bundle,
+                index_timeout=self.index_timeout,
+                index_concurrency=self.index_concurrency,
+                osv_include_private=self.osv_include_private,
                 on_event=progress,
             )
         except Exception as error:  # pragma: no cover - surfaced in the UI
@@ -184,10 +211,12 @@ class PkgRadarApp(App):
     def _apply(self, result: ScanResult) -> None:
         self.result = result
         stats = result.stats
+        primary = next((index for index in result.indexes if index.primary), None)
+        index_bit = f" · {primary.name}" if primary else ""
         self._set_status(
             f"{stats.projects} projects · {stats.packages} packages · "
             f"{stats.outdated} outdated · {stats.advisories} advisories · "
-            f"{stats.conflicts} conflicts · {stats.duration_ms} ms"
+            f"{stats.conflicts} conflicts · {stats.duration_ms} ms{index_bit}"
         )
         self._fill_fleet(result)
         self._fill_conflicts(result)
@@ -201,10 +230,10 @@ class PkgRadarApp(App):
             f"[bold]{stats.projects}[/bold] projects · "
             f"[bold]{stats.packages}[/bold] packages "
             f"([bold]{stats.unique_packages}[/bold] unique) · "
-            f"[yellow]{stats.outdated}[/yellow] outdated · "
-            f"[red]{stats.advisories}[/red] advisories · "
-            f"[magenta]{stats.conflicts}[/magenta] conflicts · "
-            f"[cyan]{stats.drifted_projects}[/cyan] drifted"
+            f"[yellow]{stats.outdated}[/] outdated · "
+            f"[red]{stats.advisories}[/] advisories · "
+            f"[magenta]{stats.conflicts}[/] conflicts · "
+            f"[cyan]{stats.drifted_projects}[/] drifted"
         )
         table = self.query_one("#fleet-table", DataTable)
         table.clear()
@@ -227,9 +256,9 @@ class PkgRadarApp(App):
                 escape(project.rel_path),
                 str(project.stats.packages),
                 str(project.stats.outdated),
-                f"[red]{project.stats.major}[/red]" if project.stats.major else "0",
-                f"[red]{project.stats.advisories}[/red]" if project.stats.advisories else "0",
-                f"[magenta]{project.stats.drift}[/magenta]" if project.stats.drift else "0",
+                f"[red]{project.stats.major}[/]" if project.stats.major else "0",
+                f"[red]{project.stats.advisories}[/]" if project.stats.advisories else "0",
+                f"[magenta]{project.stats.drift}[/]" if project.stats.drift else "0",
                 escape(venv),
                 lock,
                 key=project.id,
@@ -240,8 +269,8 @@ class PkgRadarApp(App):
         drift = sum(1 for conflict in result.conflicts if conflict.kind == "drift")
         self.query_one("#conflict-summary", Static).update(
             f"[bold]{len(result.conflicts)}[/bold] conflicts · "
-            f"[magenta]{drift}[/magenta] drift · "
-            f"[yellow]{len(result.conflicts) - drift}[/yellow] solver/constraint"
+            f"[magenta]{drift}[/] drift · "
+            f"[yellow]{len(result.conflicts) - drift}[/] solver/constraint"
         )
         table = self.query_one("#conflict-table", DataTable)
         table.clear()
@@ -251,7 +280,7 @@ class PkgRadarApp(App):
                 for item in conflict.blame[:3]
             )
             table.add_row(
-                f"[{SEVERITY.get(conflict.severity, 'white')}]{conflict.severity}[/]",
+                f"[{SEVERITY.get(conflict.severity, 'bold')}]{conflict.severity}[/]",
                 escape(conflict.project_id),
                 conflict.kind,
                 escape(conflict.title),
@@ -270,14 +299,14 @@ class PkgRadarApp(App):
         for row in result.skew:
             items = list(row.versions.items())
             versions = "  ".join(
-                f"[cyan]{escape(pid)}[/cyan]={escape(version)}" for pid, version in items[:4]
+                f"[cyan]{escape(pid)}[/]={escape(version)}" for pid, version in items[:4]
             )
             if len(items) > 4:
-                versions += f"  [dim]+{len(items) - 4} more[/dim]"
+                versions += f"  [dim]+{len(items) - 4} more[/]"
             table.add_row(
                 escape(row.name),
                 escape(row.latest or "?"),
-                f"[yellow]{row.spread}[/yellow]",
+                f"[yellow]{row.spread}[/]",
                 versions,
                 key=row.name,
             )
@@ -296,7 +325,7 @@ class PkgRadarApp(App):
             self._incoming[project.id] = incoming
             project_node = tree.root.add(
                 f"[bold]{escape(project.rel_path)}[/bold] "
-                f"[dim]{escape(project.version)} · {project.stats.packages} pkgs[/dim]",
+                f"[dim]{escape(project.version)} · {project.stats.packages} pkgs[/]",
                 data={"project": project, "node": None},
                 expand=project is result.projects[0],
             )
@@ -305,7 +334,7 @@ class PkgRadarApp(App):
             self._add_children(project_node, project, nodes, "root", set(), 0)
             if self._tree_budget <= 0:
                 project_node.add(
-                    "[dim](tree truncated — open the web UI for the full graph)[/dim]"
+                    "[dim](tree truncated — open the web UI for the full graph)[/]"
                 )
         tree.root.expand()
         first = result.projects[0]
@@ -353,78 +382,78 @@ class PkgRadarApp(App):
     def _show_project(self, project: Project) -> None:
         stats = project.stats
         lines = [
-            f"[bold]{escape(project.rel_path)}[/bold]  [dim]{escape(project.version)}[/dim]",
-            f"[dim]{escape(project.path)}[/dim]",
+            f"[bold]{escape(project.rel_path)}[/bold]  [dim]{escape(project.version)}[/]",
+            f"[dim]{escape(project.path)}[/]",
             "",
             f"[bold]{stats.packages}[/bold] packages · [bold]{stats.direct}[/bold] direct · "
             f"depth {stats.max_depth}",
-            f"[yellow]{stats.outdated}[/yellow] outdated · [red]{stats.major}[/red] major · "
-            f"[red]{stats.advisories}[/red] advisories",
-            f"[magenta]{stats.drift}[/magenta] drift · "
-            f"[cyan]{stats.conflicts}[/cyan] conflicts",
+            f"[yellow]{stats.outdated}[/] outdated · [red]{stats.major}[/] major · "
+            f"[red]{stats.advisories}[/] advisories",
+            f"[magenta]{stats.drift}[/] drift · "
+            f"[cyan]{stats.conflicts}[/] conflicts",
             "",
-            f"venv  [dim]{escape(project.venv.python or ('?' if project.venv.exists else 'none'))}[/dim]"
+            f"venv  [dim]{escape(project.venv.python or ('?' if project.venv.exists else 'none'))}[/]"
             f"  ({project.venv.installed} installed)",
-            f"lock  [dim]{'present' if project.lock.exists else 'missing'}[/dim]"
+            f"lock  [dim]{'present' if project.lock.exists else 'missing'}[/]"
             f"  ({project.lock.packages} packages"
             f"{', stale' if project.lock.stale is False else ', unknown' if project.lock.stale is None and project.lock.exists else ''})",
         ]
         if project.venv.broken:
-            lines.append("[red]venv interpreter is broken[/red]")
+            lines.append("[red]venv interpreter is broken[/]")
         self.query_one("#inspector", Static).update("\n".join(lines))
 
     def _show_node(self, project: Project, node: PackageNode) -> None:
         delta = DELTA.get(node.delta, "dim")
         lines = [
-            f"[bold]{escape(node.name)}[/bold]  [dim]{escape(node.version)}[/dim]",
+            f"[bold]{escape(node.name)}[/bold]  [dim]{escape(node.version)}[/]",
             f"[dim]{escape(project.rel_path)} · {escape(node.group)} · "
-            f"depth {node.depth}{' · direct' if node.direct else ''}[/dim]",
+            f"depth {node.depth}{' · direct' if node.direct else ''}[/]",
             "",
         ]
         if node.latest:
-            change = f"[{delta}]{node.delta}[/]" if node.delta not in ("none", "unknown") else "[green]current[/green]"
+            change = f"[{delta}]{node.delta}[/]" if node.delta not in ("none", "unknown") else "[green]current[/]"
             behind = f" · {node.releases_behind} behind" if node.releases_behind else ""
             lines.append(f"latest   [bold]{escape(node.latest)}[/bold]  {change}{behind}")
         else:
-            lines.append("latest   [dim]unknown[/dim]")
+            lines.append("latest   [dim]unknown[/]")
         if node.installed_version:
             lines.append(
                 f"installed [bold]{escape(node.installed_version)}[/bold]  "
-                f"[magenta]{node.drift or 'same'}[/magenta]"
+                f"[magenta]{node.drift or 'same'}[/]"
             )
         elif node.drift == "missing":
-            lines.append("installed [red]missing from venv[/red]")
+            lines.append("installed [red]missing from venv[/]")
         else:
-            lines.append("installed [dim]not scanned[/dim]")
+            lines.append("installed [dim]not scanned[/]")
         lines.append(f"weight   {_bar(node.risk)}  {node.risk:.2f} · {node.dependents} dependents")
         if node.license:
-            lines.append(f"license  [dim]{escape(node.license)}[/dim]")
+            lines.append(f"license  [dim]{escape(node.license)}[/]")
         if node.yanked:
-            lines.append("[red]yanked release[/red]")
+            lines.append("[red]yanked release[/]")
         if node.deprecated:
-            lines.append(f"[red]deprecated: {escape(node.deprecated)}[/red]")
+            lines.append(f"[red]deprecated: {escape(node.deprecated)}[/]")
 
         if node.risk_factors:
             lines.append("")
             lines.append("[bold]risk[/bold]")
             for factor in node.risk_factors[:6]:
-                lines.append(f"  · {escape(factor.label)}  [dim]+{factor.weight:.2f}[/dim]")
+                lines.append(f"  · {escape(factor.label)}  [dim]+{factor.weight:.2f}[/]")
 
         if node.advisories:
             lines.append("")
-            lines.append(f"[bold red]{len(node.advisories)} advisories[/bold red]")
+            lines.append(f"[bold red]{len(node.advisories)} advisories[/bold $error]")
             for advisory in node.advisories[:6]:
                 severity = advisory.severity or "?"
                 colour = "red" if severity.lower() in ("high", "critical") else "yellow"
                 summary = advisory.summary or advisory.id
                 lines.append(
                     f"  [{colour}]{escape(advisory.id)}[/{colour}] "
-                    f"[dim]{escape(severity)} · {escape(summary)[:70]}[/dim]"
+                    f"[dim]{escape(severity)} · {escape(summary)[:70]}[/]"
                 )
             if len(node.advisories) > 6:
-                lines.append(f"  [dim]+{len(node.advisories) - 6} more[/dim]")
+                lines.append(f"  [dim]+{len(node.advisories) - 6} more[/]")
             if node.fixed_in:
-                lines.append(f"  [green]fixed in {escape(node.fixed_in)}[/green]")
+                lines.append(f"  [green]fixed in {escape(node.fixed_in)}[/]")
 
         incoming = self._incoming.get(project.id, {}).get(node.id, [])
         if incoming:
@@ -436,16 +465,16 @@ class PkgRadarApp(App):
                 )
                 name = parent.name if parent else edge.source
                 lines.append(
-                    f"  [cyan]{escape(name)}[/cyan] "
-                    f"[dim]{escape(edge.spec or 'any')}[/dim]"
-                    f"  [dim]{edge.kind}[/dim]"
+                    f"  [cyan]{escape(name)}[/] "
+                    f"[dim]{escape(edge.spec or 'any')}[/]"
+                    f"  [dim]{edge.kind}[/]"
                 )
             if len(incoming) > 10:
-                lines.append(f"  [dim]+{len(incoming) - 10} more[/dim]")
+                lines.append(f"  [dim]+{len(incoming) - 10} more[/]")
 
         if node.summary:
             lines.append("")
-            lines.append(f"[dim]{escape(node.summary)}[/dim]")
+            lines.append(f"[dim]{escape(node.summary)}[/]")
 
         self.query_one("#inspector", Static).update("\n".join(lines))
 
@@ -468,6 +497,9 @@ class PkgRadarApp(App):
                 widget.focus()
                 return
 
+    def action_toggle_theme(self) -> None:
+        self.theme = "textual-light" if self.theme == "textual-dark" else "textual-dark"
+
     def action_rescan(self) -> None:
         for table_id in ("#fleet-table", "#conflict-table", "#skew-table"):
             self.query_one(table_id, DataTable).clear()
@@ -482,9 +514,29 @@ def run_tui(
     enrich: bool = True,
     advisories: bool = True,
     deep: bool = True,
+    theme: str | None = None,
+    indexes: list | None = None,
+    trust_project_indexes: bool = False,
+    index_api: str = "auto",
+    index_ca_bundle: str | None = None,
+    index_timeout: float = 25.0,
+    index_concurrency: int = 12,
+    osv_include_private: bool = False,
 ) -> int:
     app = PkgRadarApp(
-        root, offline=offline, enrich=enrich, advisories=advisories, deep=deep
+        root,
+        offline=offline,
+        enrich=enrich,
+        advisories=advisories,
+        deep=deep,
+        theme=theme,
+        indexes=indexes,
+        trust_project_indexes=trust_project_indexes,
+        index_api=index_api,
+        index_ca_bundle=index_ca_bundle,
+        index_timeout=index_timeout,
+        index_concurrency=index_concurrency,
+        osv_include_private=osv_include_private,
     )
     app.run()
     return 0

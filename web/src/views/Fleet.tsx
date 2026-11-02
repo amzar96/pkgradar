@@ -42,7 +42,7 @@ export default function Fleet() {
           </div>
           <div className="flex items-center gap-2 text-[10px] text-dim">
             <span className="h-1.5 w-1.5 rounded-full bg-good" />
-            read-only · uv lock + venv + PyPI + OSV
+            read-only · uv lock + venv + indexes + OSV
           </div>
         </div>
 
@@ -57,28 +57,28 @@ export default function Fleet() {
             label="Outdated"
             value={totals.outdated}
             hint="newer release available"
-            color="#fbbf24"
+            color="var(--color-minor)"
             icon={<ArrowUpRight size={14} />}
           />
           <StatTile
             label="Advisories"
             value={totals.advisories}
             hint="OSV matches"
-            color="#e879f9"
+            color="var(--color-cve)"
             icon={<ShieldAlert size={14} />}
           />
           <StatTile
             label="Conflicts"
             value={totals.conflicts}
             hint="ranges / env / resolver"
-            color="#f87171"
+            color="var(--color-major)"
             icon={<TriangleAlert size={14} />}
           />
           <StatTile
             label="Drift"
             value={totals.drift}
             hint="venv vs lock"
-            color="#7dd3fc"
+            color="var(--color-accent)"
             icon={<Wrench size={14} />}
           />
         </div>
@@ -157,7 +157,7 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
   return (
     <button
       onClick={onOpen}
-      className="group flex flex-col rounded-xl border border-line bg-panel p-4 text-left transition hover:border-line2 hover:bg-panel2/60"
+      className="group flex flex-col rounded-xl border border-line bg-panel p-4 text-left transition-colors hover:border-line2 hover:bg-panel2/60"
     >
       <div className="flex items-start gap-2">
         <HealthDot health={health} size={9} />
@@ -167,15 +167,15 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
         </div>
         <ArrowUpRight
           size={13}
-          className="mt-0.5 text-dim transition group-hover:text-accent"
+          className="mt-0.5 text-dim transition-colors group-hover:text-accent"
         />
       </div>
 
       <div className="mt-3 grid grid-cols-4 gap-1">
         <MiniStat label="pkgs" value={project.stats.packages} />
-        <MiniStat label="outdated" value={project.stats.outdated} colour="#fbbf24" />
-        <MiniStat label="adv" value={project.stats.advisories} colour="#e879f9" />
-        <MiniStat label="conf" value={project.conflicts.length} colour="#f87171" />
+        <MiniStat label="outdated" value={project.stats.outdated} colour="var(--color-minor)" />
+        <MiniStat label="adv" value={project.stats.advisories} colour="var(--color-cve)" />
+        <MiniStat label="conf" value={project.conflicts.length} colour="var(--color-major)" />
       </div>
 
       <div className="mt-3">
@@ -251,10 +251,10 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
 function MiniStat({ label, value, colour }: { label: string; value: number; colour?: string }) {
   return (
     <div className="rounded border border-line/60 bg-ink/40 px-1.5 py-1">
-      <div className="font-mono text-[12px] leading-none" style={{ color: colour ?? "#dbe4ee" }}>
+      <div className="font-mono text-[12px] leading-none" style={{ color: colour ?? "var(--color-fg)" }}>
         {value}
       </div>
-      <div className="mt-0.5 text-[8px] tracking-wide text-dim uppercase">{label}</div>
+      <div className="mt-0.5 text-[9px] tracking-wide text-dim uppercase">{label}</div>
     </div>
   );
 }

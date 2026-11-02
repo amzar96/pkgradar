@@ -1,20 +1,108 @@
 @import "tailwindcss";
 
-@theme {
-  --color-ink: #07080b;
-  --color-panel: #0c1015;
-  --color-panel2: #10151c;
-  --color-line: #1b232e;
-  --color-line2: #273241;
-  --color-fg: #e7edf4;
-  --color-muted: #8b98a9;
-  --color-dim: #5c6878;
-  --color-accent: #7dd3fc;
-  --color-good: #34d399;
-  --color-patch: #a3e635;
-  --color-minor: #fbbf24;
-  --color-major: #f87171;
-  --color-cve: #e879f9;
+/*
+ * Semantic theme tokens. The light palette lives on :root so the app is
+ * readable even before the pre-paint script runs; the dark palette overrides
+ * the same variables. Components should only use these tokens, never raw hex.
+ */
+:root {
+  color-scheme: light;
+
+  --ink: #f4f7fb;
+  --panel: #ffffff;
+  --panel2: #eef2f8;
+  --line: #d8e1ec;
+  --line2: #c2cedd;
+  --fg: #0f172a;
+  --muted: #46566b;
+  --dim: #5b6b7e;
+
+  --accent: #0369a1;
+  --good: #047857;
+  --patch: #4d7c0f;
+  --minor: #b45309;
+  --major: #b91c1c;
+  --cve: #a21caf;
+  --dev: #6d28d9;
+  --unknown: #55657a;
+
+  --header: rgba(255, 255, 255, 0.86);
+  --inspector: #fbfcfe;
+  --table-head: #f1f5fa;
+  --grid-dot: #c7d2e1;
+  --edge: #bdc9d8;
+  --edge-dev: #b9a9e8;
+  --edge-inferred: #e3b6b6;
+  --root-from: #e0f2fe;
+  --root-to: #ffffff;
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.1);
+  --selection: rgba(3, 105, 161, 0.18);
+  --scrollbar: #c3cedd;
+  --scrollbar-hover: #a9b8ca;
+  --focus: #0369a1;
+
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --ink: #07080b;
+  --panel: #0c1015;
+  --panel2: #10151c;
+  --line: #1b232e;
+  --line2: #273241;
+  --fg: #e7edf4;
+  --muted: #9aa8b8;
+  --dim: #7d8a9b;
+
+  --accent: #7dd3fc;
+  --good: #34d399;
+  --patch: #a3e635;
+  --minor: #fbbf24;
+  --major: #f87171;
+  --cve: #e879f9;
+  --dev: #a78bfa;
+  --unknown: #94a3b8;
+
+  --header: rgba(9, 12, 17, 0.9);
+  --inspector: #0a0d12;
+  --table-head: #0a0d12;
+  --grid-dot: #1a2330;
+  --edge: #2a3542;
+  --edge-dev: #3a3354;
+  --edge-inferred: #3a2a2a;
+  --root-from: #12202b;
+  --root-to: #0c1015;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --selection: rgba(125, 211, 252, 0.28);
+  --scrollbar: #232c38;
+  --scrollbar-hover: #33404f;
+  --focus: #7dd3fc;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel2);
+  --color-line: var(--line);
+  --color-line2: var(--line2);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-dim: var(--dim);
+  --color-accent: var(--accent);
+  --color-good: var(--good);
+  --color-patch: var(--patch);
+  --color-minor: var(--minor);
+  --color-major: var(--major);
+  --color-cve: var(--cve);
+  --color-dev: var(--dev);
+  --color-unknown: var(--unknown);
+  --color-header: var(--header);
+  --color-inspector: var(--inspector);
+  --color-table-head: var(--table-head);
   --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, monospace;
 }
 
@@ -26,8 +114,8 @@ body,
 
 body {
   margin: 0;
-  background: var(--color-ink);
-  color: var(--color-fg);
+  background: var(--ink);
+  color: var(--fg);
   font-family: ui-sans-serif, -apple-system, "Inter", "Segoe UI", sans-serif;
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
@@ -38,8 +126,13 @@ body {
   box-sizing: border-box;
 }
 
+:where(button, a, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 ::selection {
-  background: rgba(125, 211, 252, 0.28);
+  background: var(--selection);
 }
 
 ::-webkit-scrollbar {
@@ -50,12 +143,12 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #232c38;
+  background: var(--scrollbar);
   border-radius: 99px;
-  border: 2px solid var(--color-ink);
+  border: 2px solid var(--ink);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #33404f;
+  background: var(--scrollbar-hover);
 }
 
 button {
@@ -63,16 +156,17 @@ button {
   font: inherit;
 }
 
-input {
+input,
+select {
   font: inherit;
 }
 
 /* ---- react-flow theming ---- */
 .react-flow {
   --xy-background-color: transparent;
-  --xy-edge-stroke-default: #2a3542;
-  --xy-edge-stroke-selected-default: #7dd3fc;
-  --xy-connectionline-stroke-default: #7dd3fc;
+  --xy-edge-stroke-default: var(--edge);
+  --xy-edge-stroke-selected-default: var(--accent);
+  --xy-connectionline-stroke-default: var(--accent);
   --xy-attribution-background-color: transparent;
 }
 
@@ -90,42 +184,48 @@ input {
 }
 
 .react-flow__edge-path {
-  transition: stroke 120ms ease, stroke-width 120ms ease;
+  transition:
+    stroke var(--motion-fast) var(--ease-out),
+    stroke-width var(--motion-fast) var(--ease-out);
 }
 
 .react-flow__controls {
-  background: #0c1015;
-  border: 1px solid #1b232e;
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow);
 }
 
 .react-flow__controls-button {
   background: transparent;
-  border-bottom: 1px solid #1b232e;
-  color: #8b98a9;
-  fill: #8b98a9;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  fill: var(--muted);
 }
 .react-flow__controls-button:hover {
-  background: #151b24;
+  background: var(--panel2);
 }
 
 .react-flow__minimap {
-  background: #0c1015 !important;
-  border: 1px solid #1b232e;
+  background: var(--panel) !important;
+  border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
 }
 
 /* subtle canvas grid */
 .dot-grid {
-  background-image: radial-gradient(circle at 1px 1px, #1c2531 1px, transparent 0);
+  background-image: radial-gradient(circle at 1px 1px, var(--grid-dot) 1px, transparent 0);
   background-size: 22px 22px;
 }
 
 .scanline {
-  background: linear-gradient(180deg, rgba(125, 211, 252, 0.06), transparent 60%);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 6%, transparent),
+    transparent 60%
+  );
 }
 
 @keyframes pulse-soft {
@@ -154,11 +254,17 @@ input {
 }
 
 .slide-in {
-  animation: slide-in 160ms ease-out;
+  animation: slide-in var(--motion-base) var(--ease-out);
 }
 
-@keyframes shimmer {
-  100% {
-    transform: translateX(100%);
+/* Theme changes should feel immediate; motion is reserved for state changes. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

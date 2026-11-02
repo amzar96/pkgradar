@@ -38,6 +38,7 @@ export interface PackageNode {
   deprecated: string | null;
   installed_version: string | null;
   drift: DriftKind;
+  index: string | null;
   advisories: Advisory[];
   fixed_in: string | null;
   dependents: number;
@@ -161,10 +162,18 @@ export interface ScanStats {
   duration_ms: number;
 }
 
+export interface IndexRef {
+  name: string;
+  url: string;
+  source: "default" | "cli" | "env" | "project";
+  primary: boolean;
+}
+
 export interface ScanResult {
   root: string;
   generated_at: string;
   offline: boolean;
+  indexes: IndexRef[];
   projects: Project[];
   skew: SkewRow[];
   conflicts: Conflict[];

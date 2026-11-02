@@ -40,7 +40,7 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="flex w-[238px] shrink-0 flex-col border-r border-line bg-[#090c11]">
+    <aside className="flex w-[238px] shrink-0 flex-col border-r border-line bg-panel">
       <div className="flex items-center gap-2.5 border-b border-line px-4 py-4">
         <div className="relative flex h-8 w-8 items-center justify-center rounded-lg border border-accent/25 bg-accent/5">
           <Radar size={17} className="text-accent" />
@@ -60,7 +60,8 @@ export default function Sidebar() {
             <button
               key={item.id}
               onClick={() => setView(item.id)}
-              className={`group relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[12px] transition ${
+              aria-current={active ? "page" : undefined}
+              className={`group relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[12px] transition-colors ${
                 active
                   ? "bg-panel2 text-fg"
                   : "text-muted hover:bg-panel2/60 hover:text-fg"
@@ -97,7 +98,7 @@ export default function Sidebar() {
                 selectProject(project.id);
                 if (view === "fleet" || view === "skew") setView("topology");
               }}
-              className={`mb-0.5 flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 text-left transition ${
+              className={`mb-0.5 flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 text-left transition-colors ${
                 active ? "bg-panel2" : "hover:bg-panel2/60"
               }`}
             >

@@ -17,6 +17,13 @@ from .analyze import (
 )
 from .discover import DiscoveredProject, discover
 from .graph import GraphBuilder
+from .indexes import (
+    IndexConfig,
+    index_refs,
+    plan_for_project,
+    project_indexes,
+    resolve_indexes,
+)
 from .locks import load_lock
 from .models import (
     Drift,
@@ -159,13 +166,53 @@ async def scan(
     enrich: bool = True,
     advisories: bool = True,
     deep: bool = True,
+    indexes: list[IndexConfig] | None = None,
+    trust_project_indexes: bool = False,
+    index_api: str = "auto",
+    index_ca_bundle: str | None = None,
+    index_timeout: float = 25.0,
+    index_concurrency: int = 12,
+    osv_include_private: bool = False,
     on_event: EventFn | None = None,
 ) -> ScanResult:
     started = time.time()
     root = root.expanduser().resolve()
     await _emit(on_event, "progress", {"phase": "discover", "message": f"Scanning {root}", "done": 0, "total": 1})
 
+    global_indexes = list(indexes) if indexes is not None else resolve_indexes(
+        api=index_api, ca_bundle=index_ca_bundle
+    )
+    if not global_indexes:
+        global_indexes = resolve_indexes(api=index_api, ca_bundle=index_ca_bundle)
     discovered, warnings = discover(root)
+
+    # Work out which indexes each project may use before enriching. Project
+    # indexes are untrusted input and are only read with an explicit opt-in.
+    project_index_plan: dict[str, list[IndexConfig]] = {}
+    project_index_configs: list[IndexConfig] = []
+    for item in discovered:
+        local: list[IndexConfig] = []
+        if item.pyproject:
+            data = _read_toml(item.pyproject)
+            raw_indexes = ((data.get("tool") or {}).get("uv") or {}).get("index")
+            if raw_indexes and trust_project_indexes:
+                local, local_warnings = project_indexes(
+                    data, api=index_api, ca_bundle=index_ca_bundle
+                )
+                warnings.extend(f"{item.rel_path}: {warning}" for warning in local_warnings)
+                project_index_configs.extend(local)
+            elif raw_indexes:
+                warnings.append(
+                    f"{item.rel_path}: project package indexes ignored "
+                    "(pass --trust-project-indexes to use them)"
+                )
+        project_index_plan[item.id] = plan_for_project(local, global_indexes)
+    all_indexes = list(global_indexes)
+    seen_indexes = {index.key for index in all_indexes}
+    for index in project_index_configs:
+        if index.key not in seen_indexes:
+            seen_indexes.add(index.key)
+            all_indexes.append(index)
     await _emit(
         on_event,
         "progress",
@@ -199,23 +246,30 @@ async def scan(
 
     # Enrichment
     infos: dict[str, PackageInfo] = {}
+    project_infos: dict[str, dict[str, PackageInfo]] = {}
     advisory_map: dict = {}
-    if enrich:
-        names = sorted(
-            {
-                node.name
-                for project in projects
-                for node in project.nodes
-                if not node.root and node.version != "?"
-            }
+    if enrich and projects:
+        names_by_project: dict[str, list[str]] = {
+            project.id: sorted(
+                {
+                    node.name
+                    for node in project.nodes
+                    if not node.root and node.version != "?"
+                }
+            )
+            for project in projects
+        }
+        for project in projects:
+            project_infos[project.id] = {}
+
+        client = PyPIClient(
+            indexes=all_indexes,
+            offline=offline,
+            api=index_api,
+            ca_bundle=index_ca_bundle,
+            timeout=index_timeout,
+            concurrency=index_concurrency,
         )
-        total = len(names)
-        await _emit(
-            on_event,
-            "progress",
-            {"phase": "pypi", "message": f"Querying PyPI for {total} packages", "done": 0, "total": total},
-        )
-        client = PyPIClient(offline=offline)
 
         async def pypi_progress(done: int, count: int) -> None:
             if done == count or done % 5 == 0 or done == 1:
@@ -224,40 +278,161 @@ async def scan(
                     "enrich",
                     {
                         "phase": "pypi",
-                        "message": f"PyPI {done}/{count}",
+                        "message": f"Index {done}/{count}",
                         "done": done,
                         "total": count,
                     },
                 )
 
-        infos = await client.fetch_many(names, progress=pypi_progress)
+        resolved: dict[tuple[str, str], PackageInfo] = {}
+        primary_wave: dict[tuple[str, str], tuple[IndexConfig, str]] = {}
+        for project in projects:
+            indexes_for_project = project_index_plan.get(project.id) or global_indexes
+            primary = indexes_for_project[0]
+            for name in names_by_project[project.id]:
+                primary_wave[(primary.key, name)] = (primary, name)
+        primary = next(
+            (
+                (project_index_plan.get(project.id) or global_indexes)[0]
+                for project in projects
+                if project.id in project_index_plan
+            ),
+            global_indexes[0],
+        )
+        total = len(primary_wave)
+        await _emit(
+            on_event,
+            "progress",
+            {
+                "phase": "pypi",
+                "message": f"Querying {primary.name} for {total} packages",
+                "done": 0,
+                "total": total,
+            },
+        )
+        resolved.update(
+            await client.fetch_many(list(primary_wave.values()), progress=pypi_progress)
+        )
+
+        def resolve_project_infos(position: int) -> None:
+            for project in projects:
+                indexes_for_project = project_index_plan.get(project.id) or global_indexes
+                available = project_infos[project.id]
+                for name in names_by_project[project.id]:
+                    if name in available:
+                        continue
+                    for index in indexes_for_project[: position + 1]:
+                        info = resolved.get((index.key, name))
+                        if info is not None and info.available:
+                            available[name] = info
+                            break
+
+        resolve_project_infos(0)
+
+        def can_fallback(project_id: str, name: str, position: int) -> bool:
+            """A hard index error must not silently fall through to another index.
+
+            Otherwise an auth/network failure on a private primary could resolve
+            the same package name from a public fallback (dependency confusion).
+            A 404 has ``error=None`` and is allowed to fall through.
+            """
+            indexes_for_project = project_index_plan.get(project_id) or global_indexes
+            for index in indexes_for_project[: position + 1]:
+                info = resolved.get((index.key, name))
+                if info is not None and info.error:
+                    return False
+            return True
+
+        max_indexes = max(
+            (len(project_index_plan.get(project.id) or global_indexes) for project in projects),
+            default=1,
+        )
+        for position in range(1, max_indexes):
+            wave: dict[tuple[str, str], tuple[IndexConfig, str]] = {}
+            for project in projects:
+                indexes_for_project = project_index_plan.get(project.id) or global_indexes
+                if position >= len(indexes_for_project):
+                    continue
+                index = indexes_for_project[position]
+                for name in names_by_project[project.id]:
+                    if name in project_infos[project.id]:
+                        continue
+                    if (index.key, name) in resolved:
+                        continue
+                    if not can_fallback(project.id, name, position - 1):
+                        continue
+                    wave[(index.key, name)] = (index, name)
+            if not wave:
+                continue
+            resolved.update(
+                await client.fetch_many(list(wave.values()), progress=pypi_progress)
+            )
+            resolve_project_infos(position)
+
+        # Keep the final unavailable result so the UI can mark the package as
+        # "not available" instead of silently leaving it looking healthy.
+        for project in projects:
+            indexes_for_project = project_index_plan.get(project.id) or global_indexes
+            for name in names_by_project[project.id]:
+                if name in project_infos[project.id]:
+                    continue
+                for index in indexes_for_project:
+                    info = resolved.get((index.key, name))
+                    if info is not None:
+                        project_infos[project.id][name] = info
+                        break
+
+        for project in projects:
+            for name, info in project_infos[project.id].items():
+                current = infos.get(name)
+                if (
+                    current is None
+                    or (info.available and not current.available)
+                    or (info.public and not current.public)
+                ):
+                    infos[name] = info
+        for index_name, message in client.errors.items():
+            warnings.append(f"index {index_name}: {message}")
 
         if advisories and not offline:
-            pairs = sorted(
-                {
-                    (node.name, node.version)
-                    for project in projects
-                    for node in project.nodes
-                    if not node.root and node.version != "?"
+            pairs: set[tuple[str, str]] = set()
+            for project in projects:
+                public_names = {
+                    name
+                    for name, info in project_infos.get(project.id, {}).items()
+                    if info.public
                 }
-            )
-            await _emit(
-                on_event,
-                "progress",
-                {
-                    "phase": "osv",
-                    "message": f"Checking {len(pairs)} package versions against OSV",
-                    "done": 0,
-                    "total": len(pairs),
-                },
-            )
-            advisory_map = await fetch_advisories(pairs, offline=offline)
+                for node in project.nodes:
+                    if node.root or node.version == "?":
+                        continue
+                    if osv_include_private or node.name in public_names:
+                        pairs.add((node.name, node.version))
+            if pairs:
+                await _emit(
+                    on_event,
+                    "progress",
+                    {
+                        "phase": "osv",
+                        "message": f"Checking {len(pairs)} package versions against OSV",
+                        "done": 0,
+                        "total": len(pairs),
+                    },
+                )
+                advisory_map = await fetch_advisories(sorted(pairs), offline=offline)
+            else:
+                warnings.append(
+                    "OSV skipped: no packages resolved from a public index "
+                    "(pass --osv-include-private to include private packages)"
+                )
 
     for project in projects:
-        apply_enrichment(project, infos, advisory_map)
+        apply_enrichment(project, project_infos.get(project.id, {}), advisory_map)
         collect_conflicts(
             project,
-            {name: info.versions for name, info in infos.items()},
+            {
+                name: info.versions
+                for name, info in project_infos.get(project.id, {}).items()
+            },
             resolver_raw=None,
         )
         for node in project.nodes:
@@ -275,6 +450,7 @@ async def scan(
         root=str(root),
         generated_at=datetime.now(timezone.utc).isoformat(),
         offline=offline,
+        indexes=index_refs(all_indexes),
         projects=projects,
         skew=skew,
         conflicts=all_conflicts,

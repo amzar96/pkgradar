@@ -8,6 +8,13 @@ DriftKind = Literal["same", "version", "missing", "extra"]
 DeltaKind = Literal["major", "minor", "patch", "other", "none", "unknown"]
 
 
+class IndexRef(BaseModel):
+    name: str
+    url: str
+    source: Literal["default", "cli", "env", "project"] = "default"
+    primary: bool = False
+
+
 class Advisory(BaseModel):
     id: str
     aliases: list[str] = Field(default_factory=list)
@@ -49,6 +56,7 @@ class PackageNode(BaseModel):
     # environment truth
     installed_version: str | None = None
     drift: DriftKind | None = None
+    index: str | None = None
 
     advisories: list[Advisory] = Field(default_factory=list)
     fixed_in: str | None = None
@@ -178,6 +186,7 @@ class ScanResult(BaseModel):
     root: str
     generated_at: str
     offline: bool = False
+    indexes: list[IndexRef] = Field(default_factory=list)
     projects: list[Project] = Field(default_factory=list)
     skew: list[SkewRow] = Field(default_factory=list)
     conflicts: list[Conflict] = Field(default_factory=list)

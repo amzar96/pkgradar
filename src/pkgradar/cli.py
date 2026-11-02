@@ -8,6 +8,58 @@ import webbrowser
 from pathlib import Path
 
 from . import __version__
+from .indexes import resolve_indexes
+
+
+def _add_index_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--index-url",
+        default=None,
+        help="primary package index (simple API root; default: PyPI)",
+    )
+    parser.add_argument(
+        "--extra-index-url",
+        action="append",
+        default=[],
+        metavar="URL",
+        help="additional package index; may be repeated",
+    )
+    parser.add_argument(
+        "--index-api",
+        choices=["auto", "json", "simple"],
+        default="auto",
+        help="index protocol: legacy JSON where available, else PEP 503 simple",
+    )
+    parser.add_argument(
+        "--trust-project-indexes",
+        action="store_true",
+        help="honor [[tool.uv.index]] from scanned pyproject.toml files",
+    )
+    parser.add_argument(
+        "--index-ca-bundle",
+        default=None,
+        metavar="PATH",
+        help="CA bundle for private package indexes",
+    )
+    parser.add_argument(
+        "--index-timeout",
+        type=float,
+        default=25.0,
+        metavar="SECONDS",
+        help="per-request index timeout (default: 25)",
+    )
+    parser.add_argument(
+        "--index-concurrency",
+        type=int,
+        default=12,
+        metavar="N",
+        help="concurrent index requests (default: 12)",
+    )
+    parser.add_argument(
+        "--osv-include-private",
+        action="store_true",
+        help="send private-index package names to OSV (off by default)",
+    )
 
 
 def _add_scan_flags(parser: argparse.ArgumentParser) -> None:
@@ -16,6 +68,7 @@ def _add_scan_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--no-enrich", action="store_true", help="skip PyPI lookups")
     parser.add_argument("--no-advisories", action="store_true", help="skip OSV lookups")
     parser.add_argument("--fast", action="store_true", help="skip uv lock check / sync dry-run")
+    _add_index_flags(parser)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,9 +94,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="allow binding a non-loopback host (exposes the UI to your network)",
     )
+    _add_index_flags(serve_parser)
 
     tui_parser = sub.add_parser("tui", help="start the terminal UI")
     _add_scan_flags(tui_parser)
+    tui_parser.add_argument(
+        "--theme",
+        choices=["dark", "light"],
+        default=None,
+        help="TUI theme (default: dark, or PKGRADAR_THEME)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -64,6 +124,19 @@ def _root(value: str | None) -> Path:
     return Path(value).expanduser().resolve() if value else Path.cwd().resolve()
 
 
+def _indexes(args: argparse.Namespace):
+    try:
+        return resolve_indexes(
+            args.index_url,
+            args.extra_index_url,
+            api=args.index_api,
+            ca_bundle=args.index_ca_bundle,
+        )
+    except ValueError as exc:
+        print(f"pkgradar: invalid index configuration: {exc}", file=sys.stderr)
+        raise SystemExit(2) from None
+
+
 def _scan(args: argparse.Namespace) -> int:
     from rich.console import Console
     from rich.markup import escape
@@ -74,12 +147,20 @@ def _scan(args: argparse.Namespace) -> int:
     root = _root(args.root)
     if not args.quiet:
         console.print(f"[bold]pkgradar[/bold] scanning [cyan]{escape(str(root))}[/cyan]")
+    indexes = _indexes(args)
     result = scan_sync(
         root,
         offline=args.offline,
         enrich=not args.no_enrich,
         advisories=not args.no_advisories,
         deep=not args.fast,
+        indexes=indexes,
+        trust_project_indexes=args.trust_project_indexes,
+        index_api=args.index_api,
+        index_ca_bundle=args.index_ca_bundle,
+        index_timeout=args.index_timeout,
+        index_concurrency=args.index_concurrency,
+        osv_include_private=args.osv_include_private,
     )
 
     if args.json_out:
@@ -192,7 +273,18 @@ def _serve(args: argparse.Namespace) -> int:
         )
 
     root = _root(args.root)
-    app = create_app(root, allow_remote=not loopback)
+    indexes = _indexes(args)
+    app = create_app(
+        root,
+        allow_remote=not loopback,
+        indexes=indexes,
+        trust_project_indexes=args.trust_project_indexes,
+        index_api=args.index_api,
+        index_ca_bundle=args.index_ca_bundle,
+        index_timeout=args.index_timeout,
+        index_concurrency=args.index_concurrency,
+        osv_include_private=args.osv_include_private,
+    )
     url = f"http://{args.host}:{args.port}"
     print(f"pkgradar {__version__} -> {url}  (root: {root})")
     if args.open:
@@ -204,12 +296,21 @@ def _serve(args: argparse.Namespace) -> int:
 def _tui(args: argparse.Namespace) -> int:
     from .tui import run_tui
 
+    indexes = _indexes(args)
     return run_tui(
         _root(args.root),
         offline=args.offline,
         enrich=not args.no_enrich,
         advisories=not args.no_advisories,
         deep=not args.fast,
+        theme=args.theme,
+        indexes=indexes,
+        trust_project_indexes=args.trust_project_indexes,
+        index_api=args.index_api,
+        index_ca_bundle=args.index_ca_bundle,
+        index_timeout=args.index_timeout,
+        index_concurrency=args.index_concurrency,
+        osv_include_private=args.osv_include_private,
     )
 
 

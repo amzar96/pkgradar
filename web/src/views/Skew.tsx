@@ -11,6 +11,7 @@ export default function Skew() {
   const selectNode = useApp((state) => state.selectNode);
   const setView = useApp((state) => state.setView);
   const [term, setTerm] = useState("");
+  const [limit, setLimit] = useState(100);
 
   const rows = useMemo(() => {
     const skew = result?.skew ?? [];
@@ -41,6 +42,7 @@ export default function Skew() {
         <div className="ml-auto flex items-center gap-1.5 rounded-md border border-line bg-panel px-2 py-1.5">
           <Search size={12} className="text-dim" />
           <input
+            aria-label="Filter packages"
             value={term}
             onChange={(event) => setTerm(event.target.value)}
             placeholder="filter packages"
@@ -64,9 +66,9 @@ export default function Skew() {
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full border-collapse text-left">
-            <thead className="sticky top-0 z-10 bg-[#0a0d12]/95 backdrop-blur">
+            <thead className="sticky top-0 z-10 bg-table-head">
               <tr className="border-b border-line">
-                <th className="sticky left-0 z-20 bg-[#0a0d12] py-2 pr-4 pl-5 text-[9px] tracking-[0.14em] text-dim uppercase">
+                <th className="sticky left-0 z-20 bg-table-head py-2 pr-4 pl-5 text-[9px] tracking-[0.14em] text-dim uppercase">
                   package
                 </th>
                 <th className="px-3 py-2 text-[9px] tracking-[0.14em] text-dim uppercase">latest</th>
@@ -83,9 +85,9 @@ export default function Skew() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {rows.slice(0, limit).map((row) => (
                 <tr key={row.name} className="border-b border-line/50 hover:bg-panel2/40">
-                  <td className="sticky left-0 z-10 bg-[#0a0d12] py-1.5 pr-4 pl-5">
+                  <td className="sticky left-0 z-10 bg-panel py-1.5 pr-4 pl-5">
                     <span className="font-mono text-[11px] text-fg">{row.name}</span>
                   </td>
                   <td className="px-3 py-1.5 font-mono text-[10px] text-dim">
@@ -127,7 +129,7 @@ export default function Skew() {
                             if (node) selectNode(node.id);
                             setView("topology");
                           }}
-                          className={`rounded px-1.5 py-0.5 font-mono text-[10px] transition hover:bg-panel2 ${
+                          className={`rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors hover:bg-panel2 ${
                             isOldest && behindLatest
                               ? "text-major"
                               : isNewest && behindLatest
@@ -147,13 +149,23 @@ export default function Skew() {
               ))}
             </tbody>
           </table>
+          {rows.length > limit ? (
+            <div className="flex justify-center py-4">
+              <button
+                onClick={() => setLimit(limit + 200)}
+                className="rounded border border-line px-3 py-1.5 text-[10px] text-muted transition-colors hover:text-fg"
+              >
+                show more ({rows.length - limit} remaining)
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
 
       <div className="flex items-center gap-3 border-t border-line px-5 py-2 text-[9px] text-dim">
-        <Pill color="#34d399">newest</Pill>
-        <Pill color="#fbbf24">newest but behind PyPI</Pill>
-        <Pill color="#f87171">oldest &amp; behind</Pill>
+        <Pill color="var(--color-good)">newest</Pill>
+        <Pill color="var(--color-minor)">newest but behind PyPI</Pill>
+        <Pill color="var(--color-major)">oldest &amp; behind</Pill>
         <span className="ml-auto">click any cell to open that package in the graph</span>
       </div>
     </div>

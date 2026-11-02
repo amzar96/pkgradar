@@ -1,4 +1,5 @@
 import type { PackageNode } from "../types";
+import { alpha } from "./theme";
 
 export type Health = "ok" | "patch" | "minor" | "major" | "cve" | "unknown";
 
@@ -15,13 +16,15 @@ export function health(node: PackageNode): Health {
 }
 
 export const HEALTH_COLOR: Record<Health, string> = {
-  ok: "#34d399",
-  patch: "#a3e635",
-  minor: "#fbbf24",
-  major: "#f87171",
-  cve: "#e879f9",
-  unknown: "#64748b",
+  ok: "var(--color-good)",
+  patch: "var(--color-patch)",
+  minor: "var(--color-minor)",
+  major: "var(--color-major)",
+  cve: "var(--color-cve)",
+  unknown: "var(--color-unknown)",
 };
+
+export { alpha };
 
 export const HEALTH_LABEL: Record<Health, string> = {
   ok: "Up to date",
@@ -83,16 +86,15 @@ export function shortNumber(value: number): string {
 export function severityColor(severity: string | null | undefined): string {
   switch ((severity || "").toUpperCase()) {
     case "CRITICAL":
-      return "#f43f5e";
     case "HIGH":
-      return "#fb7185";
+      return "var(--color-major)";
     case "MODERATE":
     case "MEDIUM":
-      return "#fbbf24";
+      return "var(--color-minor)";
     case "LOW":
-      return "#60a5fa";
+      return "var(--color-accent)";
     default:
-      return "#94a3b8";
+      return "var(--color-muted)";
   }
 }
 
